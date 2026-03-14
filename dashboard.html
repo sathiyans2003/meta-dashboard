@@ -411,6 +411,12 @@
           <div class="tbl-hd" style="display:flex;justify-content:space-between;align-items:center;">
             <div><span class="tbl-title">Campaigns</span><span class="tbl-count" id="campCount">—</span></div>
             <div style="display:flex; gap:8px; align-items:center;">
+              <select id="campStatusFilter" class="action-btn" onchange="handleStatusFilter('camp', this.value)" style="background:var(--bg-2); font-size:11.5px;">
+                <option value="ALL">All Status</option>
+                <option value="ACTIVE">Active Only</option>
+                <option value="PAUSED">Paused Only</option>
+                <option value="ARCHIVED">Archived/Others</option>
+              </select>
               <input type="text" id="campSearch" placeholder="Search Campaign Name or ID..."
                 oninput="handleSearch('camp')"
                 style="padding:6px 12px;border-radius:6px;border:1px solid var(--border-md);background:var(--bg-2);color:var(--text);font-family:var(--ff-ui);font-size:12px;width:240px;outline:none;" />
@@ -442,6 +448,12 @@
           <div class="tbl-hd" style="display:flex;justify-content:space-between;align-items:center;">
             <div><span class="tbl-title">Ad Sets</span><span class="tbl-count" id="adsetCount">—</span></div>
             <div style="display:flex; gap:8px; align-items:center;">
+              <select id="adsetStatusFilter" class="action-btn" onchange="handleStatusFilter('adset', this.value)" style="background:var(--bg-2); font-size:11.5px;">
+                <option value="ALL">All Status</option>
+                <option value="ACTIVE">Active Only</option>
+                <option value="PAUSED">Paused Only</option>
+                <option value="ARCHIVED">Archived/Others</option>
+              </select>
               <input type="text" id="adsetSearch" placeholder="Search Ad Set Name or ID..."
                 oninput="handleSearch('adset')"
                 style="padding:6px 12px;border-radius:6px;border:1px solid var(--border-md);background:var(--bg-2);color:var(--text);font-family:var(--ff-ui);font-size:12px;width:240px;outline:none;" />
@@ -468,6 +480,12 @@
           <div class="tbl-hd" style="display:flex;justify-content:space-between;align-items:center;">
             <div><span class="tbl-title">Ads</span><span class="tbl-count" id="adCount">—</span></div>
             <div style="display:flex; gap:8px; align-items:center;">
+              <select id="adStatusFilter" class="action-btn" onchange="handleStatusFilter('ad', this.value)" style="background:var(--bg-2); font-size:11.5px;">
+                <option value="ALL">All Status</option>
+                <option value="ACTIVE">Active Only</option>
+                <option value="PAUSED">Paused Only</option>
+                <option value="ARCHIVED">Archived/Others</option>
+              </select>
               <input type="text" id="adSearch" placeholder="Search Ad Name or ID..." oninput="handleSearch('ad')"
                 style="padding:6px 12px;border-radius:6px;border:1px solid var(--border-md);background:var(--bg-2);color:var(--text);font-family:var(--ff-ui);font-size:12px;width:240px;outline:none;" />
               <button class="action-btn" onclick="openColSettings('ad')"><svg width="14" height="14" viewBox="0 0 24 24"

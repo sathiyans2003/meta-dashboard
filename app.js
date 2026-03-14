@@ -6,6 +6,13 @@ let currentToken = null;
 let currentAccountId = null;
 let allAccounts = [];
 let selectedCampaignIds = new Set();
+let currentSearchData = { camp: "", adset: "", ad: "" };
+let currentStatusFilter = { camp: "ALL", adset: "ALL", ad: "ALL" };
+let currentSort = {
+  camp: { k: "spend", dir: "desc" },
+  adset: { k: "spend", dir: "desc" },
+  ad: { k: "spend", dir: "desc" }
+};
 
 // ══════════════════════════════════════════════════════════════
 // INITIAL AUTH CHECK
@@ -318,7 +325,7 @@ function applySelectionFilter() {
   renderOverview(s, true); // true means it's a filtered view
 }
 
-let currentSearchData = { camp: "", adset: "", ad: "" };
+
 
 function getActiveCols(tab) {
   const all = { camp: campCols, adset: adsetCols, ad: adCols }[tab];
@@ -330,25 +337,75 @@ function getActiveCols(tab) {
 function renderTab(tab) {
   if (!data) return;
   if (tab === "overview")   applySelectionFilter();
-  if (tab === "campaigns")  renderTable("camp",  filterData(data.campaigns, currentSearchData.camp), getActiveCols("camp"));
-  if (tab === "adsets")     renderTable("adset", filterData(data.adsets, currentSearchData.adset), getActiveCols("adset"));
-  if (tab === "ads")        renderTable("ad",    filterData(data.ads, currentSearchData.ad), getActiveCols("ad"));
+  if (tab === "campaigns")  renderTable("camp",  getFilteredData("camp"), getActiveCols("camp"));
+  if (tab === "adsets")     renderTable("adset", getFilteredData("adset"), getActiveCols("adset"));
+  if (tab === "ads")        renderTable("ad",    getFilteredData("ad"), getActiveCols("ad"));
+}
+
+function getFilteredData(tabPrefix) {
+  const map = { camp: "campaigns", adset: "adsets", ad: "ads" };
+  let rows = data[map[tabPrefix]] || [];
+  
+  // 1. Search Query
+  const q = currentSearchData[tabPrefix];
+  if (q) {
+    rows = rows.filter(r => 
+      (r.name && r.name.toLowerCase().includes(q)) || 
+      (r.id && r.id.toLowerCase().includes(q))
+    );
+  }
+  
+  // 2. Status Filter
+  const s = currentStatusFilter[tabPrefix];
+  if (s !== "ALL") {
+    rows = rows.filter(r => {
+      const rs = String(r.status).toUpperCase();
+      if (s === "ACTIVE") return rs === "ACTIVE";
+      if (s === "PAUSED") return rs === "PAUSED";
+      if (s === "ARCHIVED") return rs !== "ACTIVE" && rs !== "PAUSED";
+      return true;
+    });
+  }
+  
+  // 3. Sorting
+  const sort = currentSort[tabPrefix];
+  if (sort && sort.k) {
+    rows.sort((a, b) => {
+      let va = a[sort.k], vb = b[sort.k];
+      // Numeric sort check
+      let fa = parseFloat(va), fb = parseFloat(vb);
+      if (!isNaN(fa) && !isNaN(fb)) {
+        return sort.dir === "asc" ? fa - fb : fb - fa;
+      }
+      // String sort
+      va = String(va || "").toLowerCase();
+      vb = String(vb || "").toLowerCase();
+      if (va < vb) return sort.dir === "asc" ? -1 : 1;
+      if (va > vb) return sort.dir === "asc" ? 1 : -1;
+      return 0;
+    });
+  }
+  
+  return rows;
 }
 
 function handleSearch(tabPrefix) {
-  const v = document.getElementById(`${tabPrefix}Search`)?.value.toLowerCase() || "";
-  currentSearchData[tabPrefix] = v;
-  if (!data) return;
-  const map = { camp: "campaigns", adset: "adsets", ad: "ads" };
-  renderTable(tabPrefix, filterData(data[map[tabPrefix]], v), getActiveCols(tabPrefix));
+  currentSearchData[tabPrefix] = document.getElementById(`${tabPrefix}Search`)?.value.toLowerCase() || "";
+  renderTab(tabPrefix);
 }
 
-function filterData(rows, q) {
-  if (!q) return rows;
-  return rows.filter(r => 
-    (r.name && r.name.toLowerCase().includes(q)) || 
-    (r.id && r.id.toLowerCase().includes(q))
-  );
+function handleStatusFilter(tabPrefix, v) {
+  currentStatusFilter[tabPrefix] = v;
+  renderTab(tabPrefix);
+}
+
+function handleSort(tabPrefix, key) {
+  if (currentSort[tabPrefix].k === key) {
+    currentSort[tabPrefix].dir = currentSort[tabPrefix].dir === "asc" ? "desc" : "asc";
+  } else {
+    currentSort[tabPrefix] = { k: key, dir: "desc" };
+  }
+  renderTab(tabPrefix);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -630,7 +687,14 @@ function renderTable(id, rows, cols) {
 
   const thead = document.getElementById(`${id}Head`);
   if (thead) { 
-    let headHtml = cols.map(c=>`<th>${c.h}</th>`).join("");
+    const sort = currentSort[id];
+    let headHtml = cols.map(c => {
+      const isSorted = sort.k === c.k;
+      const arrow = isSorted ? (sort.dir === "asc" ? " ↑" : " ↓") : "";
+      const sortCls = isSorted ? "sort-active" : "";
+      return `<th onclick="handleSort('${id}', '${c.k}')" class="sortable ${sortCls}">${c.h}${arrow}</th>`;
+    }).join("");
+    
     if (id === "camp") {
       headHtml = `<th style="width:40px; text-align:center;"><input type="checkbox" id="selectAllCamps" onchange="toggleSelectAllCamps(this.checked)" ${selectedCampaignIds.size > 0 && selectedCampaignIds.size === rows.length ? 'checked' : ''} /></th>` + headHtml;
     }

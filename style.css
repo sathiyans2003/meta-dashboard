@@ -706,6 +706,23 @@ body {
   background: var(--bg-1);
   position: sticky;
   top: 0;
+  z-index: 10;
+}
+
+.dt th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s;
+}
+
+.dt th.sortable:hover {
+  background: var(--bg-2);
+  color: var(--fb);
+}
+
+.dt th.sort-active {
+  color: var(--fb) !important;
+  background: var(--fb-dim) !important;
 }
 
 .dt tbody tr {
