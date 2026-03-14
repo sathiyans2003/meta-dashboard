@@ -136,8 +136,44 @@ document.querySelectorAll(".nav-link").forEach(a => {
 
 function toggleSidebar() { document.getElementById("sidebar").classList.toggle("open"); }
 
+function handleDateChange(v) {
+  const wrap = document.getElementById("customDateWrap");
+  if (v === "custom") {
+    wrap.style.display = "flex";
+  } else {
+    wrap.style.display = "none";
+    changeDatePreset(v);
+  }
+}
+
+async function applyCustomDate() {
+  const since = document.getElementById("startDate").value;
+  const until = document.getElementById("endDate").value;
+  if (!since || !until) return alert("Select both dates");
+  
+  setStatus("wait");
+  try {
+    await fetch(`${API}/daterange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ datePreset: { since, until } })
+    });
+  } catch (err) {
+    alert("Date range update failed: " + err.message);
+  }
+}
+
 async function changeDatePreset(v) {
-  try { await fetch(`${API}/daterange`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({datePreset:v}) }); } catch(_){}
+  setStatus("wait");
+  try { 
+    await fetch(`${API}/daterange`, { 
+      method: "POST", 
+      headers: { "Content-Type": "application/json" }, 
+      body: JSON.stringify({ datePreset: v }) 
+    }); 
+  } catch(e) {
+    console.error("Date change failed:", e);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════

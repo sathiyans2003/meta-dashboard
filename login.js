@@ -12,9 +12,11 @@ function switchMode(mode) {
 // FB Popup Open
 function startFBOAuth() {
   const btn = document.getElementById("fbOAuthBtn");
+  const btnText = document.getElementById("fbOAuthBtnText");
   btn.disabled = true;
-  document.getElementById("fbOAuthBtnText").textContent = "Opening Facebook...";
+  btnText.textContent = "Opening Facebook...";
 
+  // Check if App ID is placeholder (optional but helpful)
   const authUrl = (window.location.protocol === "file:" || window.location.hostname === "" || window.location.hostname === "localhost") ? "http://localhost:4000/auth/facebook" : window.location.origin + "/auth/facebook";
   const popup = window.open(authUrl, "fbAuth", "width=600,height=700,scrollbars=yes,resizable=yes");
 

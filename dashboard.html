@@ -326,8 +326,14 @@
           </div>
         </div>
 
-        <!-- Date Preset Select -->
-        <select class="action-btn" id="datePresetSel" onchange="changeDatePreset(this.value)"
+        <div id="customDateWrap" style="display:none; align-items:center; gap:8px;">
+          <input type="date" id="startDate" class="action-btn" style="padding:6px; height:34px; width:130px;" />
+          <span style="color:var(--muted); font-size:12px;">to</span>
+          <input type="date" id="endDate" class="action-btn" style="padding:6px; height:34px; width:130px;" />
+          <button class="action-btn" onclick="applyCustomDate()" style="background:var(--fb); color:white; border:none;">Apply</button>
+        </div>
+
+        <select class="action-btn" id="datePresetSel" onchange="handleDateChange(this.value)"
           style="padding-right:28px;background:var(--bg-2);">
           <option value="today">Today</option>
           <option value="yesterday">Yesterday</option>
@@ -336,7 +342,7 @@
           <option value="this_month">This Month</option>
           <option value="last_month">Last Month</option>
           <option value="maximum">Maximum</option>
-          <option value="custom">Custom</option>
+          <option value="custom">Custom Range</option>
         </select>
         <button class="action-btn" id="refreshBtn" onclick="manualRefresh()">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
