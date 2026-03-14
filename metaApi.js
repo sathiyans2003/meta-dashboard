@@ -21,7 +21,8 @@ function cleanId(id) {
 function getAction(actions = [], type) {
   if (!Array.isArray(actions)) return "0";
   const f = actions.find((a) => a.action_type === type);
-  return f ? parseFloat(f.value).toFixed(2) : "0";
+  const v = parseFloat(f?.value || 0);
+  return isNaN(v) ? "0" : v.toFixed(2);
 }
 
 function getRoas(list = []) {
@@ -36,25 +37,48 @@ function fmt(val, d = 2) {
 function getResultsCount(actions = [], objective) {
   if (!Array.isArray(actions)) return 0;
   const obj = String(objective || "").toUpperCase();
+
   const map = {
-    'OUTCOME_SALES':      ['purchase'],
-    'OUTCOME_LEADS':      ['lead', 'onsite_conversion.lead_grouped'],
+    'OUTCOME_SALES': ['purchase', 'onsite_conversion.purchase', 'onsite_conversion.purchase_grouped_60d'],
+    'OUTCOME_LEADS': ['lead', 'onsite_conversion.lead_grouped', 'onsite_conversion.total_lead_value'],
     'OUTCOME_ENGAGEMENT': ['onsite_conversion.messaging_conversation_started_7d', 'post_engagement', 'page_engagement'],
-    'OUTCOME_TRAFFIC':    ['link_click', 'landing_page_view'],
-    'OUTCOME_AWARENESS':  ['reach'],
+    'OUTCOME_TRAFFIC': ['landing_page_view', 'link_click'],
+    'OUTCOME_AWARENESS': ['reach', 'impressions'],
     'OUTCOME_APP_PROMOTION': ['app_install']
   };
-  const types = map[obj] || ['link_click'];
-  let val = 0;
-  // Pick the first found action type from the prioritized list to avoid double counting
-  for (const t of types) {
-    const f = actions.find(a => a.action_type === t);
-    if (f && parseFloat(f.value) > 0) {
-      val = parseFloat(f.value);
-      break; 
+
+  // 1. If specific objective is known, pick the top prioritized action
+  if (obj && map[obj]) {
+    const types = map[obj];
+    for (const t of types) {
+      const f = actions.find(a => a.action_type === t);
+      if (f && parseFloat(f.value) > 0) return parseFloat(f.value);
     }
+    return 0; // If a Sales campaign has 0 sales, it has 0 results (ignore clicks)
   }
-  return val;
+
+  // 2. If no objective or unknown (Summary), sum the "Real" Conversions
+  const coreConversions = [
+    'purchase', 'onsite_conversion.purchase',
+    'lead', 'onsite_conversion.lead_grouped',
+    'onsite_conversion.messaging_conversation_started_7d'
+  ];
+
+  let coreSum = 0;
+  let foundCore = false;
+  coreConversions.forEach(t => {
+    const f = actions.find(a => a.action_type === t);
+    if (f) {
+      coreSum += parseFloat(f.value || 0);
+      foundCore = true;
+    }
+  });
+
+  if (foundCore) return coreSum;
+
+  // 3. Last fallback (Traffic ads etc)
+  const lc = actions.find(a => a.action_type === 'link_click');
+  return parseFloat(lc?.value || 0);
 }
 
 function applyDate(params, datePreset) {
@@ -116,14 +140,14 @@ async function validateAccount(accountId, token) {
 // ─── Account Summary ──────────────────────────────────────────────────────────
 
 const SUMMARY_FIELDS = [
-  "objective", "impressions", "clicks", "unique_clicks", "unique_ctr", "ctr",
+  "objective", "results", "impressions", "clicks", "unique_clicks", "unique_ctr", "ctr",
   "spend", "reach", "frequency", "cpm", "cpc", "cpp",
   "actions", "action_values",
   "purchase_roas", "website_purchase_roas", "cost_per_action_type",
   "quality_ranking", "engagement_rate_ranking", "conversion_rate_ranking",
-  "video_thruplay_watched_actions", "video_p25_watched_actions", 
-  "video_p50_watched_actions", "video_p75_watched_actions", 
-  "video_p95_watched_actions", "video_p100_watched_actions", 
+  "video_thruplay_watched_actions", "video_p25_watched_actions",
+  "video_p50_watched_actions", "video_p75_watched_actions",
+  "video_p95_watched_actions", "video_p100_watched_actions",
   "outbound_clicks", "outbound_clicks_ctr",
   "inline_link_clicks", "inline_link_click_ctr", "cost_per_unique_click",
   "date_start", "date_stop"
@@ -136,9 +160,9 @@ const ITEM_FIELDS = [
   "actions", "action_values",
   "purchase_roas", "website_purchase_roas", "cost_per_action_type",
   "quality_ranking", "engagement_rate_ranking", "conversion_rate_ranking",
-  "video_thruplay_watched_actions", "video_p25_watched_actions", 
-  "video_p50_watched_actions", "video_p75_watched_actions", 
-  "video_p95_watched_actions", "video_p100_watched_actions", 
+  "video_thruplay_watched_actions", "video_p25_watched_actions",
+  "video_p50_watched_actions", "video_p75_watched_actions",
+  "video_p95_watched_actions", "video_p100_watched_actions",
   "outbound_clicks", "outbound_clicks_ctr",
   "inline_link_clicks", "inline_link_click_ctr", "cost_per_unique_click",
   "date_start", "date_stop"
@@ -152,14 +176,9 @@ function parseMetrics(d) {
   const roas = d.purchase_roas || d.website_purchase_roas || [];
   const spend = parseFloat(d.spend || 0);
   const imps = parseInt(d.impressions || 0);
-  
-  // Prioritize actual 'results' field from API if available
-  let resCount = 0;
-  if (d.results && Array.isArray(d.results)) {
-    resCount = d.results.reduce((acc, r) => acc + parseFloat(r.values?.[0]?.value || r.value || 0), 0);
-  } else {
-    resCount = getResultsCount(ac, d.objective);
-  }
+
+  // Always use our custom result calculation logic to ensure accuracy
+  const resCount = getResultsCount(ac, d.objective);
 
   const cpRes = resCount > 0 ? (spend / resCount) : 0;
   const resRate = imps > 0 ? ((resCount / imps) * 100).toFixed(2) : "0";
@@ -192,6 +211,11 @@ function parseMetrics(d) {
 
     leads: String(leadCount),
     costPerLead: fmt(cpLead),
+
+    messagingConversations: String(msgCount),
+    costPerConversation: fmt(cpMsg),
+
+    linkClicks: getAction(ac, "link_click"),
 
     addToCart: getAction(ac, "add_to_cart"),
     initiateCheckout: getAction(ac, "initiate_checkout"),
@@ -228,20 +252,22 @@ async function fetchAccountSummary(accountId, token, datePreset = "today") {
 
 async function fetchCampaigns(accountId, token, datePreset = "today") {
   const params = applyDate({
-    level: "campaign",
-    fields: `campaign_id,campaign_name,${ITEM_FIELDS}`,
-    limit: 500,
+    fields: `id,name,status,objective,daily_budget,lifetime_budget,insights{${ITEM_FIELDS}}`,
+    limit: 100,
   }, datePreset);
 
-  const raw = await fetchAll(accountId, token, "insights", params);
-  
-  // We need to fetch campaign metadata for budget if insights don't have it
-  // But for now let's try mapping from insights if fields allowed
+  const raw = await fetchAll(accountId, token, "campaigns", params);
+
   return raw.map((c) => {
+    const insight = c.insights?.data?.[0] || {};
     const budget = c.daily_budget || c.lifetime_budget || "0";
+    const metrics = parseMetrics({ ...insight, budget, objective: c.objective });
     return {
-      id: c.campaign_id || "", name: c.campaign_name || "", objective: c.objective || "",
-      ...parseMetrics({ ...c, budget })
+      ...metrics,
+      id: c.id,
+      name: c.name,
+      objective: c.objective || "",
+      status: c.status || "UNKNOWN"
     };
   });
 }
@@ -250,33 +276,48 @@ async function fetchCampaigns(accountId, token, datePreset = "today") {
 
 async function fetchAdSets(accountId, token, datePreset = "today") {
   const params = applyDate({
-    level: "adset",
-    fields: `adset_id,adset_name,campaign_name,${ITEM_FIELDS}`,
-    limit: 500,
+    fields: `id,name,status,campaign{name},daily_budget,lifetime_budget,insights{${ITEM_FIELDS}}`,
+    limit: 100,
   }, datePreset);
 
-  const raw = await fetchAll(accountId, token, "insights", params);
-  return raw.map((a) => ({
-    id: a.adset_id || "", name: a.adset_name || "", campaignName: a.campaign_name || "",
-    ...parseMetrics(a)
-  }));
+  const raw = await fetchAll(accountId, token, "adsets", params);
+
+  return raw.map((s) => {
+    const insight = s.insights?.data?.[0] || {};
+    const budget = s.daily_budget || s.lifetime_budget || "0";
+    const metrics = parseMetrics({ ...insight, budget });
+    return {
+      ...metrics,
+      id: s.id,
+      name: s.name,
+      campaignName: s.campaign?.name || "",
+      status: s.status || "UNKNOWN"
+    };
+  });
 }
 
 // ─── Ads ──────────────────────────────────────────────────────────────────────
 
 async function fetchAds(accountId, token, datePreset = "today") {
   const params = applyDate({
-    level: "ad",
-    fields: `ad_id,ad_name,adset_name,campaign_name,${ITEM_FIELDS}`,
-    limit: 500,
+    fields: `id,name,status,adset{name},campaign{name},insights{${ITEM_FIELDS}}`,
+    limit: 100,
   }, datePreset);
 
-  const raw = await fetchAll(accountId, token, "insights", params);
-  return raw.map((a) => ({
-    id: a.ad_id || "", name: a.ad_name || "", adsetName: a.adset_name || "",
-    campaignName: a.campaign_name || "",
-    ...parseMetrics(a)
-  }));
+  const raw = await fetchAll(accountId, token, "ads", params);
+
+  return raw.map((a) => {
+    const insight = a.insights?.data?.[0] || {};
+    const metrics = parseMetrics({ ...insight });
+    return {
+      ...metrics,
+      id: a.id,
+      name: a.name,
+      adsetName: a.adset?.name || "",
+      campaignName: a.campaign?.name || "",
+      status: a.status || "UNKNOWN"
+    };
+  });
 }
 
 module.exports = { validateToken, validateAccount, fetchAccountSummary, fetchCampaigns, fetchAdSets, fetchAds };

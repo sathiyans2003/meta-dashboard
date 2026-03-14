@@ -68,9 +68,14 @@ function renderAccList(accounts, activeId) {
   const list = document.getElementById("accountSwitcherList");
   if (!list) return;
   list.innerHTML = accounts.map(a => `
-    <div class="acc-list-item ${a.id === activeId ? 'active' : ''}" onclick="switchAccount('${a.id.replace('act_','')}')">
-      <div class="acc-list-name">${a.name}</div>
-      <div class="acc-list-id">${a.id} · ${a.currency || ''}</div>
+    <div class="acc-list-item ${a.id === activeId ? 'active' : ''}" onclick="switchAccount('${a.id.replace('act_','')}')" style="display:flex; justify-content:space-between; align-items:center;">
+      <div>
+        <div class="acc-list-name">${a.name}</div>
+        <div class="acc-list-id">${a.id} · ${a.currency || ''}</div>
+      </div>
+      <div style="font-size:10px; color:var(--muted); text-align:right;">
+        ${a.timezone_name || a.timezone || ''}
+      </div>
     </div>
   `).join("");
 }
@@ -88,34 +93,61 @@ function filterAccounts() {
   renderAccList(filtered, currentAccountId);
 }
 
-function toggleAccDropdown() {
-  document.getElementById("accDropdown").classList.toggle("show");
+function openAccountModal() {
+  document.getElementById("accModalOverlay").classList.add("show");
+  document.getElementById("accSearchInp").value = "";
+  renderAccList(allAccounts, currentAccountId);
+  setTimeout(() => document.getElementById("accSearchInp").focus(), 100);
 }
 
-document.addEventListener("click", (e) => {
-  const wrap = document.getElementById("accSwitcherWrap");
-  if (wrap && !wrap.contains(e.target)) {
-    document.getElementById("accDropdown")?.classList.remove("show");
+function closeAccountModal() {
+  document.getElementById("accModalOverlay").classList.remove("show");
+}
+
+function filterAccounts() {
+  const q = document.getElementById("accSearchInp")?.value.toLowerCase() || "";
+  if (!q) {
+    renderAccList(allAccounts, currentAccountId);
+    return;
   }
-});
+  const filtered = allAccounts.filter(a => 
+    (a.name && a.name.toLowerCase().includes(q)) || 
+    (a.id && a.id.toLowerCase().includes(q))
+  );
+  renderAccList(filtered, currentAccountId);
+}
 
 async function switchAccount(newAccountId) {
-  document.getElementById("accDropdown")?.classList.remove("show");
-  if (!newAccountId || newAccountId === currentAccountId.replace('act_','')) return;
+  closeAccountModal();
+  const fullId = "act_" + newAccountId;
+  if (!newAccountId || fullId === currentAccountId) return;
   
   setStatus("wait");
+  // Immediate UI feedback
+  if (document.getElementById("overviewAccName")) {
+    document.getElementById("overviewAccName").textContent = "Switching account...";
+    document.getElementById("overviewAccId").textContent = fullId;
+  }
+  
   try {
     const res = await fetch(`${API}/connect`, {
       method: "POST", 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ 
         token: currentToken, 
-        accountId: "act_" + newAccountId, 
+        accountId: fullId, 
         datePreset: document.getElementById("datePresetSel").value 
       })
     });
     const json = await res.json();
-    if (!json.ok) alert("Failed to switch account: " + json.error);
+    if (!json.ok) {
+      alert("Failed to switch account: " + json.error);
+      // Revert title if failed
+      updateSidebarAccount(allAccounts.find(a => a.id === currentAccountId));
+    } else {
+      currentAccountId = fullId;
+      updateAccountSwitcher(fullId);
+    }
   } catch(e) {
     alert("Error switching account: " + e.message);
   }
@@ -263,6 +295,16 @@ function updateSidebarAccount(acc) {
   document.getElementById("pageDesc").textContent = `${acc.name || ""} · ${acc.currency || ""}`;
   document.getElementById("sidebarAccName").textContent = acc.name || "—";
   document.getElementById("sidebarAccId").textContent   = acc.id   || "—";
+  if (document.getElementById("sidebarAccTz")) {
+    document.getElementById("sidebarAccTz").textContent = acc.timezone || "—";
+  }
+  
+  // Also update Overview Tab banner
+  if (document.getElementById("overviewAccName")) {
+    document.getElementById("overviewAccName").textContent = acc.name || "—";
+    document.getElementById("overviewAccId").textContent   = acc.id   || "—";
+    document.getElementById("overviewAccTz").textContent   = acc.timezone || "—";
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -272,8 +314,16 @@ function onData(msg) {
   setStatus("ok");
   const { runCount: rc } = msg;
   document.getElementById("runCount").textContent = `Run #${rc}`;
+  
+  const cLive = data.campaigns.filter(c => c.status === "ACTIVE").length;
+  const cOff = data.campaigns.filter(c => c.status === "PAUSED").length;
+  const sLive = data.adsets.filter(s => s.status === "ACTIVE").length;
+  const sOff = data.adsets.filter(s => s.status === "PAUSED").length;
+  const aLive = data.ads.filter(a => a.status === "ACTIVE").length;
+  const aOff = data.ads.filter(a => a.status === "PAUSED").length;
+
   document.getElementById("pageDesc").textContent =
-    `${data.campaigns.length} campaigns · ${data.adsets.length} ad sets · ${data.ads.length} ads`;
+    `${data.campaigns.length} Campaigns (${cLive} Live) · ${data.adsets.length} Ad Sets · ${data.ads.length} Ads (${aLive} Live)`;
     
   applySelectionFilter(); // Update summary if selection exists
   const activeTab = document.querySelector(".nav-link.active")?.dataset?.tab || "overview";
@@ -285,13 +335,18 @@ function applySelectionFilter() {
   const clearBtn = document.getElementById("clearSelectionBtn");
   if (clearBtn) clearBtn.style.display = selectedCampaignIds.size > 0 ? "flex" : "none";
 
+  const selBar = document.getElementById("selectionBar");
   if (selectedCampaignIds.size === 0) {
+    if (selBar) selBar.classList.remove("active");
     renderOverview(data.summary);
     return;
   }
 
+  if (selBar) selBar.classList.add("active");
+
   const selectedCamps = data.campaigns.filter(c => selectedCampaignIds.has(c.id));
   if (selectedCamps.length === 0) {
+    if (selBar) selBar.classList.remove("active");
     renderOverview(data.summary);
     return;
   }
@@ -321,6 +376,14 @@ function applySelectionFilter() {
   s.costPerConversation = s.messagingConversations > 0 ? (s.spend / s.messagingConversations).toFixed(2) : "0.00";
   s.frequency = s.reach > 0 ? (s.impressions / s.reach).toFixed(2) : "1.00";
   s.uniqueCtr = s.reach > 0 ? ((s.uniqueClicks / s.reach) * 100).toFixed(2) : "0.00";
+
+  // Update selection bar UI
+  if (document.getElementById("selCount")) {
+    document.getElementById("selCount").textContent = `${selectedCampaignIds.size} Selected`;
+    document.getElementById("selSpend").textContent = `₹${fmtM(s.spend)}`;
+    document.getElementById("selResults").textContent = fmtBig(s.results);
+    document.getElementById("selRoas").textContent = `${s.purchaseRoas}×`;
+  }
 
   renderOverview(s, true); // true means it's a filtered view
 }
@@ -547,7 +610,18 @@ let activeColIds = {
 function loadColPrefs() {
   try {
     const saved = localStorage.getItem("metaColPrefs");
-    if (saved) activeColIds = JSON.parse(saved);
+    if (saved) {
+      activeColIds = JSON.parse(saved);
+      // Force 'status' column if it's missing from any tab
+      ["camp", "adset", "ad"].forEach(tab => {
+        if (activeColIds[tab] && !activeColIds[tab].includes("status")) {
+          // Insert status after name or at index 2
+          const nameIdx = activeColIds[tab].indexOf("name");
+          if (nameIdx !== -1) activeColIds[tab].splice(nameIdx + 1, 0, "status");
+          else activeColIds[tab].splice(2, 0, "status");
+        }
+      });
+    }
   } catch(e) {}
 }
 
@@ -584,43 +658,127 @@ function openColSettings(tabPrefix) {
   let all = [];
   if (tabPrefix === "overview") all = ALL_METRICS;
   else all = { camp: campCols, adset: adsetCols, ad: adCols }[tabPrefix];
-  
-  const activeIds = activeColIds[tabPrefix] || [];
-  
-  const ttls = { overview:"Top KPI Strip Options", camp:"Campaign Columns", adset:"Ad Set Columns", ad:"Ad Columns" };
-  document.getElementById("colModalTtl").textContent = ttls[tabPrefix];
 
-  // Presets UI
+  const activeIds = activeColIds[tabPrefix] || [];
+  const ttls = { overview:"Top KPI Strip", camp:"Campaign Columns", adset:"Ad Set Columns", ad:"Ad Columns" };
+  document.getElementById("colModalTtl").textContent = ttls[tabPrefix] || "Customize Columns";
+
+  // Build list: active columns first (in their saved order), then the rest
+  const activeCols = activeIds.map(id => all.find(c => c.k === id)).filter(Boolean);
+  const inactiveCols = all.filter(c => !activeIds.includes(c.k));
+  const ordered = [...activeCols, ...inactiveCols];
+
+  // Presets
   let presetsHtml = "";
   if (tabPrefix !== "overview") {
     presetsHtml = `
-      <div style="margin-bottom:16px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-        ${Object.entries(PRESETS).map(([k, p]) => `
-          <button class="action-btn" style="font-size:10px; padding:6px; justify-content:center; background:var(--bg-3);" onclick="applyPreset('${k}')">
-            ${p.name}
-          </button>
-        `).join("")}
+      <div style="margin-bottom:12px;">
+        <div style="font-size:10px; color:var(--muted); margin-bottom:6px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">Quick Presets</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+          ${Object.entries(PRESETS).map(([k, p]) => `
+            <button class="action-btn" style="font-size:10px; padding:6px; justify-content:center; background:var(--bg-3);" onclick="applyPreset('${k}')">${p.name}</button>
+          `).join("")}
+        </div>
       </div>
-      <div style="font-size:10px; color:var(--muted); margin-bottom:8px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">Individual Options</div>
+      <div style="font-size:10px; color:var(--muted); margin-bottom:8px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">All Columns</div>
     `;
   }
 
-  document.getElementById("colModalList").innerHTML = presetsHtml + all.map(c => {
-    const isChecked = activeIds.includes(c.k) ? "checked" : "";
+  document.getElementById("colModalList").innerHTML = presetsHtml + ordered.map((c, i) => {
+    const isChecked = activeIds.includes(c.k);
     return `
-      <label class="col-opt">
-        <input type="checkbox" class="col-chk" value="${c.k}" ${isChecked} />
+      <label class="col-opt${isChecked ? ' checked' : ''}" draggable="true" data-key="${c.k}">
+        <span class="col-drag-handle" title="Drag to reorder">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="9" cy="7" r="1.5"/><circle cx="15" cy="7" r="1.5"/>
+            <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
+            <circle cx="9" cy="17" r="1.5"/><circle cx="15" cy="17" r="1.5"/>
+          </svg>
+        </span>
+        <input type="checkbox" class="col-chk" value="${c.k}" ${isChecked ? 'checked' : ''} onchange="updateColSelectedStrip()" />
         <span class="col-label">${c.h}</span>
+        ${isChecked ? '<span class="col-count">✓</span>' : ''}
       </label>
     `;
   }).join("");
-  
+
   const searchInp = document.getElementById("colSearchInp");
-  if (searchInp) {
-    searchInp.value = "";
-  }
-  
+  if (searchInp) searchInp.value = "";
+
+  updateColSelectedStrip();
+  setupColDragDrop();
   document.getElementById("colModalOverlay").classList.add("show");
+}
+
+function updateColSelectedStrip() {
+  const chks = document.querySelectorAll("#colModalList .col-chk");
+  const selected = [];
+  chks.forEach(chk => { if (chk.checked) selected.push({ k: chk.value, h: chk.closest('.col-opt').querySelector('.col-label').textContent }); });
+  
+  document.getElementById("colSelectedCount").textContent = `(${selected.length})`;
+  
+  const strip = document.getElementById("colSelectedStrip");
+  if (!strip) return;
+  strip.innerHTML = selected.length ? selected.map(s =>
+    `<span class="col-chip">${s.h}<span class="col-chip-rm" onclick="removeColChip('${s.k}')" title="Remove">×</span></span>`
+  ).join("") : `<span style="font-size:11px; color:var(--muted); padding:4px;">No columns selected</span>`;
+}
+
+function removeColChip(key) {
+  const chk = document.querySelector(`#colModalList .col-chk[value="${key}"]`);
+  if (chk) { chk.checked = false; chk.closest('.col-opt').classList.remove('checked'); }
+  updateColSelectedStrip();
+}
+
+function setupColDragDrop() {
+  const list = document.getElementById("colModalList");
+  let dragSrc = null;
+
+  list.querySelectorAll('.col-opt[draggable]').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      dragSrc = el;
+      e.dataTransfer.effectAllowed = 'move';
+      el.style.opacity = '0.4';
+    });
+    el.addEventListener('dragend', () => {
+      el.style.opacity = '';
+      list.querySelectorAll('.col-opt').forEach(i => i.classList.remove('drag-over'));
+    });
+    el.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      list.querySelectorAll('.col-opt').forEach(i => i.classList.remove('drag-over'));
+      el.classList.add('drag-over');
+    });
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      if (dragSrc !== el) {
+        // Reorder DOM
+        const items = [...list.querySelectorAll('.col-opt[draggable]')];
+        const fromIdx = items.indexOf(dragSrc);
+        const toIdx = items.indexOf(el);
+        if (fromIdx > toIdx) list.insertBefore(dragSrc, el);
+        else list.insertBefore(dragSrc, el.nextSibling);
+      }
+      el.classList.remove('drag-over');
+    });
+  });
+}
+
+function resetColDefaults() {
+  if (!currentColEditingTab) return;
+  const defaults = {
+    overview: ["spend", "results", "costPerResult", "impressions", "clicks", "ctr", "purchaseRoas", "reach"],
+    camp:  ["id", "name", "status", "results", "costPerResult", "spend", "impressions", "ctr", "purchases", "purchaseRoas"],
+    adset: ["id", "name", "status", "results", "costPerResult", "spend", "ctr", "cpm", "cpc", "purchases", "purchaseRoas"],
+    ad:    ["id", "name", "status", "results", "costPerResult", "spend", "ctr", "cpm", "cpc", "purchases", "purchaseRoas", "linkClicks"]
+  };
+  const ids = defaults[currentColEditingTab] || [];
+  document.querySelectorAll('#colModalList .col-chk').forEach(chk => {
+    chk.checked = ids.includes(chk.value);
+    chk.closest('.col-opt').classList.toggle('checked', chk.checked);
+  });
+  updateColSelectedStrip();
 }
 
 function filterModalCols() {
@@ -642,27 +800,38 @@ function closeColSettings() {
 
 function saveColSettings() {
   if (!currentColEditingTab) return;
-  const chks = document.querySelectorAll("#colModalList .col-chk");
+
+  // Respect drag order: iterate DOM elements in their current order
+  const opts = document.querySelectorAll("#colModalList .col-opt[draggable]");
   const selected = [];
-  chks.forEach(chk => { if (chk.checked) selected.push(chk.value); });
-  
+  opts.forEach(opt => {
+    const chk = opt.querySelector(".col-chk");
+    if (chk && chk.checked) selected.push(chk.value);
+  });
+  // Fallback: also check non-draggable checkboxes (presets area)
   if (selected.length === 0) {
-    alert("Please select at least one item.");
+    document.querySelectorAll("#colModalList .col-chk").forEach(chk => {
+      if (chk.checked) selected.push(chk.value);
+    });
+  }
+
+  if (selected.length === 0) {
+    alert("Please select at least one column.");
     return;
   }
-  
+
   activeColIds[currentColEditingTab] = selected;
   try { localStorage.setItem("metaColPrefs", JSON.stringify(activeColIds)); } catch(e){}
-  
+
   closeColSettings();
-  
+
   // Re-render
   if (!data) return;
   if (currentColEditingTab === "overview") {
     renderOverview(data.summary);
   } else {
     const map = { camp: "campaigns", adset: "adsets", ad: "ads" };
-    renderTable(currentColEditingTab, filterData(data[map[currentColEditingTab]], currentSearchData[currentColEditingTab]), getActiveCols(currentColEditingTab));
+    renderTable(currentColEditingTab, getFilteredData(currentColEditingTab), getActiveCols(currentColEditingTab));
   }
 }
 
@@ -676,12 +845,20 @@ function renderTable(id, rows, cols) {
     const paused = rows.filter(r => String(r.status).toUpperCase() === "PAUSED").length;
     
     container.innerHTML = `
-      <span style="color:var(--text); font-weight:600;">${total} Total</span>
-      <span style="margin:0 8px; color:var(--border);">|</span>
-      <span style="color:var(--green);">${active} Active</span>
-      <span style="margin:0 8px; color:var(--border);">|</span>
-      <span style="color:var(--amber);">${paused} Paused</span>
+      <b style="color:var(--text);">${total}</b> <span style="font-size:10px; opacity:0.7;">TOTAL</span>
+      <span style="margin:0 6px; opacity:0.3;">|</span>
+      <b style="color:var(--green);">${active}</b> <span style="font-size:10px; opacity:0.7;">LIVE</span>
+      <span style="margin:0 6px; opacity:0.3;">|</span>
+      <b style="color:var(--amber);">${paused}</b> <span style="font-size:10px; opacity:0.7;">OFFLINE</span>
     `;
+    container.style.display = "inline-flex";
+    container.style.alignItems = "center";
+    container.style.padding = "4px 12px";
+    container.style.background = "var(--bg-2)";
+    container.style.borderRadius = "99px";
+    container.style.border = "1px solid var(--border)";
+    container.style.fontFamily = "var(--ff-mono)";
+    container.style.fontSize = "11px";
   }
 
 
@@ -695,8 +872,11 @@ function renderTable(id, rows, cols) {
       return `<th onclick="handleSort('${id}', '${c.k}')" class="sortable ${sortCls}">${c.h}${arrow}</th>`;
     }).join("");
     
+    // Always add a leading column for consistency (checkbox or spacer)
     if (id === "camp") {
       headHtml = `<th style="width:40px; text-align:center;"><input type="checkbox" id="selectAllCamps" onchange="toggleSelectAllCamps(this.checked)" ${selectedCampaignIds.size > 0 && selectedCampaignIds.size === rows.length ? 'checked' : ''} /></th>` + headHtml;
+    } else {
+      headHtml = `<th style="width:40px;"></th>` + headHtml;
     }
     thead.innerHTML = headHtml;
   }
@@ -730,12 +910,14 @@ function renderTable(id, rows, cols) {
       totalRow.cpc = (totalRow.spend / totalRow.clicks).toFixed(2);
     if (totalRow.resultRate !== undefined && totalRow.impressions > 0)
       totalRow.resultRate = (totalRow.results / totalRow.impressions * 100).toFixed(2);
-    if (totalRow.purchaseRoas !== undefined && totalRow.spend > 0)
-      totalRow.purchaseRoas = (totalRow.purchaseValue / totalRow.spend).toFixed(2);
+    if (totalRow.purchaseRoas !== undefined && totalRow.spend > 0) {
+      const roas = (totalRow.purchaseValue / totalRow.spend);
+      totalRow.purchaseRoas = isNaN(roas) ? "0.00" : roas.toFixed(2);
+    }
   }
 
   let totalTrHtml = cols.map(c=>`<td class="${tdClass(c.f)}">${fmtCell(totalRow[c.k],c.f)}</td>`).join("");
-  if (id === "camp") totalTrHtml = `<td></td>` + totalTrHtml;
+  totalTrHtml = `<td></td>` + totalTrHtml; // Leader spacer for all tables
   const totalTr = `<tr class="tr-total">${totalTrHtml}</tr>`;
 
   tbody.innerHTML = totalTr + rows.map(r => {
@@ -743,6 +925,8 @@ function renderTable(id, rows, cols) {
     if (id === "camp") {
       const isChecked = selectedCampaignIds.has(r.id) ? "checked" : "";
       rowHtml = `<td style="text-align:center;"><input type="checkbox" class="row-chk" onchange="toggleCampSelection('${r.id}')" ${isChecked} /></td>` + rowHtml;
+    } else {
+      rowHtml = `<td></td>` + rowHtml; // Spacer
     }
     return `<tr>${rowHtml}</tr>`;
   }).join("");
@@ -755,19 +939,20 @@ function toggleCampSelection(id) {
 }
 
 function toggleSelectAllCamps(checked) {
+  const filtered = getFilteredData("camp");
   if (checked) {
-    data.campaigns.forEach(c => selectedCampaignIds.add(c.id));
+    filtered.forEach(c => selectedCampaignIds.add(c.id));
   } else {
-    selectedCampaignIds.clear();
+    filtered.forEach(c => selectedCampaignIds.delete(c.id));
   }
   applySelectionFilter();
-  renderTable("camp", filterData(data.campaigns, currentSearchData.camp), getActiveCols("camp"));
+  renderTable("camp", filtered, getActiveCols("camp"));
 }
 
 function clearCampSelection() {
   selectedCampaignIds.clear();
   applySelectionFilter();
-  renderTable("camp", filterData(data.campaigns, currentSearchData.camp), getActiveCols("camp"));
+  renderTable("camp", getFilteredData("camp"), getActiveCols("camp"));
 }
 
 function tdClass(f) { return f==="money"?"td-money":f==="roas"?"td-roas":f==="muted"||f==="id"?"td-muted":""; }
@@ -778,7 +963,8 @@ function fmtCell(v, f) {
     case "status": {
       const s = String(v).toUpperCase();
       const cls = s==="ACTIVE"?"active":s==="PAUSED"?"paused":"archived";
-      return `<span class="badge badge-${cls}">${s}</span>`;
+      const lbl = s==="ACTIVE"?"LIVE":s==="PAUSED"?"OFFLINE":s;
+      return `<span class="badge badge-${cls}">${lbl}</span>`;
     }
     case "money": return `₹${fmtM(v)}`;
     case "roas":  return `${v}×`;

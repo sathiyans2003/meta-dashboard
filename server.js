@@ -18,7 +18,7 @@ app.use(express.json());
 app.use(express.static(__dirname));
 
 const PORT = process.env.PORT || 4000;
-const INTERVAL = parseInt(process.env.UPDATE_INTERVAL_SECONDS || "10") * 1000;
+const INTERVAL = parseInt(process.env.UPDATE_INTERVAL_SECONDS || "900") * 1000; // Default to 15 mins
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let CONFIG = {
@@ -84,7 +84,16 @@ function startLoop() {
 // ─── Facebook OAuth — Auto Connect ───────────────────────────────────────────
 app.get("/auth/facebook", (req, res) => {
   const appId = process.env.META_APP_ID;
-  if (!appId) return res.status(400).send("META_APP_ID not set in .env");
+  if (!appId || appId === "your_meta_app_id_here") {
+    return res.status(400).send(`
+      <div style="font-family:sans-serif; padding:40px; text-align:center;">
+        <h2 style="color:#d32f2f;">❌ Configuration Required</h2>
+        <p>You haven't set your <b>META_APP_ID</b> in the <code>.env</code> file.</p>
+        <p>Please edit the <code>.env</code> file and restart the server.</p>
+        <a href="/" style="color:#1877F2;">← Go Back</a>
+      </div>
+    `);
+  }
   const redirect = encodeURIComponent(`${req.protocol}://${req.get("host")}/auth/callback`);
   const scope = "ads_read,ads_management,business_management,pages_read_engagement";
   res.redirect(`https://www.facebook.com/dialog/oauth?client_id=${appId}&redirect_uri=${redirect}&scope=${scope}&response_type=code`);
@@ -206,9 +215,17 @@ app.post("/api/connect", async (req, res) => {
     return res.status(401).json({ ok: false, error: "Invalid token: " + tokenCheck.error });
   }
 
-  const accountCheck = await validateAccount(accountId, token);
-  if (!accountCheck.ok) {
-    return res.status(400).json({ ok: false, error: "Account error: " + accountCheck.error });
+  // Optimize: Check if we already have this account info in our cached list to avoid a slow API call
+  let accountCheck = null;
+  const cachedAcc = (accountInfo?.allAccounts || []).find(a => "act_" + a.id === accountId || a.id === accountId);
+  
+  if (cachedAcc) {
+    accountCheck = { ok: true, name: cachedAcc.name, id: cachedAcc.id, currency: cachedAcc.currency, timezone: cachedAcc.timezone_name };
+  } else {
+    accountCheck = await validateAccount(accountId, token);
+    if (!accountCheck.ok) {
+      return res.status(400).json({ ok: false, error: "Account error: " + accountCheck.error });
+    }
   }
 
   // Preserve allAccounts if already known or fetch them so the dropdown works
