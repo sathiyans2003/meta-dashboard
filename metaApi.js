@@ -229,7 +229,7 @@ async function fetchAccountSummary(accountId, token, datePreset = "today") {
 async function fetchCampaigns(accountId, token, datePreset = "today") {
   const params = applyDate({
     level: "campaign",
-    fields: `campaign_id,campaign_name,budget_remaining,daily_budget,lifetime_budget,${ITEM_FIELDS}`,
+    fields: `campaign_id,campaign_name,${ITEM_FIELDS}`,
     limit: 500,
   }, datePreset);
 
