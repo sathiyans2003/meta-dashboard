@@ -5,6 +5,7 @@ let ws = null, data = null, reconn = null;
 let currentToken = null;
 let currentAccountId = null;
 let allAccounts = [];
+let selectedCampaignIds = new Set();
 
 // ══════════════════════════════════════════════════════════════
 // INITIAL AUTH CHECK
@@ -267,8 +268,54 @@ function onData(msg) {
   document.getElementById("pageDesc").textContent =
     `${data.campaigns.length} campaigns · ${data.adsets.length} ad sets · ${data.ads.length} ads`;
     
+  applySelectionFilter(); // Update summary if selection exists
   const activeTab = document.querySelector(".nav-link.active")?.dataset?.tab || "overview";
   renderTab(activeTab);
+}
+
+function applySelectionFilter() {
+  if (!data) return;
+  const clearBtn = document.getElementById("clearSelectionBtn");
+  if (clearBtn) clearBtn.style.display = selectedCampaignIds.size > 0 ? "flex" : "none";
+
+  if (selectedCampaignIds.size === 0) {
+    renderOverview(data.summary);
+    return;
+  }
+
+  const selectedCamps = data.campaigns.filter(c => selectedCampaignIds.has(c.id));
+  if (selectedCamps.length === 0) {
+    renderOverview(data.summary);
+    return;
+  }
+
+  // Aggregate stats
+  let s = {
+    spend: 0, impressions: 0, reach: 0, clicks: 0, linkClicks: 0,
+    purchases: 0, purchaseValue: 0, leads: 0, messagingConversations: 0, results: 0,
+    postEngagement: 0, v100: 0, videoViews: 0, landingPageViews: 0, uniqueClicks: 0
+  };
+
+  selectedCamps.forEach(c => {
+    Object.keys(s).forEach(k => {
+      s[k] += parseFloat(c[k] || 0);
+    });
+  });
+
+  // Calculate Averages
+  s.ctr = s.impressions > 0 ? ((s.clicks / s.impressions) * 100).toFixed(2) : "0.00";
+  s.cpc = s.clicks > 0 ? (s.spend / s.clicks).toFixed(2) : "0.00";
+  s.cpm = s.impressions > 0 ? (s.spend / (s.impressions / 1000)).toFixed(2) : "0.00";
+  s.purchaseRoas = s.spend > 0 ? (s.purchaseValue / s.spend).toFixed(2) : "0.00";
+  s.resultRate = s.impressions > 0 ? ((s.results / s.impressions) * 100).toFixed(2) : "0.00";
+  s.costPerResult = s.results > 0 ? (s.spend / s.results).toFixed(2) : "0.00";
+  s.costPerPurchase = s.purchases > 0 ? (s.spend / s.purchases).toFixed(2) : "0.00";
+  s.costPerLead = s.leads > 0 ? (s.spend / s.leads).toFixed(2) : "0.00";
+  s.costPerConversation = s.messagingConversations > 0 ? (s.spend / s.messagingConversations).toFixed(2) : "0.00";
+  s.frequency = s.reach > 0 ? (s.impressions / s.reach).toFixed(2) : "1.00";
+  s.uniqueCtr = s.reach > 0 ? ((s.uniqueClicks / s.reach) * 100).toFixed(2) : "0.00";
+
+  renderOverview(s, true); // true means it's a filtered view
 }
 
 let currentSearchData = { camp: "", adset: "", ad: "" };
@@ -282,7 +329,7 @@ function getActiveCols(tab) {
 
 function renderTab(tab) {
   if (!data) return;
-  if (tab === "overview")   renderOverview(data.summary);
+  if (tab === "overview")   applySelectionFilter();
   if (tab === "campaigns")  renderTable("camp",  filterData(data.campaigns, currentSearchData.camp), getActiveCols("camp"));
   if (tab === "adsets")     renderTable("adset", filterData(data.adsets, currentSearchData.adset), getActiveCols("adset"));
   if (tab === "ads")        renderTable("ad",    filterData(data.ads, currentSearchData.ad), getActiveCols("ad"));
@@ -307,7 +354,13 @@ function filterData(rows, q) {
 // ══════════════════════════════════════════════════════════════
 // OVERVIEW RENDER
 // ══════════════════════════════════════════════════════════════
-function renderOverview(s) {
+function renderOverview(s, isFiltered = false) {
+  const kpiTitle = document.querySelector("#tab-overview h2");
+  if (kpiTitle) {
+    kpiTitle.innerHTML = isFiltered 
+      ? `Top KPIs <span style="color:var(--fb); font-size:12px; margin-left:10px;">(Filtered by ${selectedCampaignIds.size} Selected)</span>`
+      : `Top KPIs <span style="color:var(--muted); font-size:12px; margin-left:10px;">(Account Total)</span>`;
+  }
   const kpiIds = activeColIds["overview"] || ["spend", "impressions", "clicks", "ctr", "purchaseRoas", "cpc", "cpm", "reach"];
   const kpis = kpiIds.map(id => {
     const def = ALL_METRICS.find(m => m.k === id);
@@ -576,12 +629,18 @@ function renderTable(id, rows, cols) {
 
 
   const thead = document.getElementById(`${id}Head`);
-  if (thead) { thead.innerHTML = cols.map(c=>`<th>${c.h}</th>`).join(""); }
+  if (thead) { 
+    let headHtml = cols.map(c=>`<th>${c.h}</th>`).join("");
+    if (id === "camp") {
+      headHtml = `<th style="width:40px; text-align:center;"><input type="checkbox" id="selectAllCamps" onchange="toggleSelectAllCamps(this.checked)" ${selectedCampaignIds.size > 0 && selectedCampaignIds.size === rows.length ? 'checked' : ''} /></th>` + headHtml;
+    }
+    thead.innerHTML = headHtml;
+  }
 
   const tbody = document.getElementById(`${id}Body`);
   if (!tbody) return;
   if (!rows?.length) {
-    tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center;padding:40px;color:var(--muted)">No data available</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${cols.length + (id==="camp"?1:0)}" style="text-align:center;padding:40px;color:var(--muted)">No data available</td></tr>`;
     return;
   }
 
@@ -611,11 +670,40 @@ function renderTable(id, rows, cols) {
       totalRow.purchaseRoas = (totalRow.purchaseValue / totalRow.spend).toFixed(2);
   }
 
-  const totalTr = `<tr class="tr-total">${cols.map(c=>`<td class="${tdClass(c.f)}">${fmtCell(totalRow[c.k],c.f)}</td>`).join("")}</tr>`;
+  let totalTrHtml = cols.map(c=>`<td class="${tdClass(c.f)}">${fmtCell(totalRow[c.k],c.f)}</td>`).join("");
+  if (id === "camp") totalTrHtml = `<td></td>` + totalTrHtml;
+  const totalTr = `<tr class="tr-total">${totalTrHtml}</tr>`;
 
-  tbody.innerHTML = totalTr + rows.map(r =>
-    `<tr>${cols.map(c=>`<td class="${tdClass(c.f)}">${fmtCell(r[c.k],c.f)}</td>`).join("")}</tr>`
-  ).join("");
+  tbody.innerHTML = totalTr + rows.map(r => {
+    let rowHtml = cols.map(c=>`<td class="${tdClass(c.f)}">${fmtCell(r[c.k],c.f)}</td>`).join("");
+    if (id === "camp") {
+      const isChecked = selectedCampaignIds.has(r.id) ? "checked" : "";
+      rowHtml = `<td style="text-align:center;"><input type="checkbox" class="row-chk" onchange="toggleCampSelection('${r.id}')" ${isChecked} /></td>` + rowHtml;
+    }
+    return `<tr>${rowHtml}</tr>`;
+  }).join("");
+}
+
+function toggleCampSelection(id) {
+  if (selectedCampaignIds.has(id)) selectedCampaignIds.delete(id);
+  else selectedCampaignIds.add(id);
+  applySelectionFilter();
+}
+
+function toggleSelectAllCamps(checked) {
+  if (checked) {
+    data.campaigns.forEach(c => selectedCampaignIds.add(c.id));
+  } else {
+    selectedCampaignIds.clear();
+  }
+  applySelectionFilter();
+  renderTable("camp", filterData(data.campaigns, currentSearchData.camp), getActiveCols("camp"));
+}
+
+function clearCampSelection() {
+  selectedCampaignIds.clear();
+  applySelectionFilter();
+  renderTable("camp", filterData(data.campaigns, currentSearchData.camp), getActiveCols("camp"));
 }
 
 function tdClass(f) { return f==="money"?"td-money":f==="roas"?"td-roas":f==="muted"||f==="id"?"td-muted":""; }

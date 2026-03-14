@@ -414,6 +414,11 @@
               <input type="text" id="campSearch" placeholder="Search Campaign Name or ID..."
                 oninput="handleSearch('camp')"
                 style="padding:6px 12px;border-radius:6px;border:1px solid var(--border-md);background:var(--bg-2);color:var(--text);font-family:var(--ff-ui);font-size:12px;width:240px;outline:none;" />
+              <button id="clearSelectionBtn" class="action-btn" onclick="clearCampSelection()" style="display:none; color:var(--red); border-color:var(--red-dim); background:var(--red-dim);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg> Clear Selection
+              </button>
               <button class="action-btn" onclick="openColSettings('camp')"><svg width="14" height="14"
                   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />

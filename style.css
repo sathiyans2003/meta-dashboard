@@ -419,15 +419,18 @@ body {
    KPI STRIP
 ───────────────────────────────────────────────────────────────── */
 .kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  display: flex;
+  overflow-x: auto;
   background: var(--bg-1);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  overflow: hidden;
   margin-bottom: 20px;
   position: relative;
+  scrollbar-width: thin;
 }
+
+.kpi-strip::-webkit-scrollbar { height: 4px; }
+.kpi-strip::-webkit-scrollbar-thumb { background: var(--fb-dim); border-radius: 4px; }
 
 /* Top gradient bar */
 .kpi-strip::before {
@@ -446,10 +449,12 @@ body {
 }
 
 .kpi {
+  flex: 1 0 160px;
   padding: 18px 16px 15px;
   border-right: 1px solid var(--border);
   position: relative;
   transition: background 0.18s;
+  text-align: center;
 }
 
 .kpi:last-child { border-right: none; }
