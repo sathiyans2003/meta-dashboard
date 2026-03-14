@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login | Meta Ads Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="style.css"/>
+  <style>
+    body { display:flex; align-items:center; justify-content:center; padding:20px; }
+    .connect-screen { position:relative; display:flex; background:none; z-index:10; }
+    /* ── Facebook OAuth Loading Overlay ── */
+    .fb-loading{position:fixed;inset:0;background:rgba(7,11,19,0.92);backdrop-filter:blur(8px);z-index:99999;display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px;}
+    .fb-loading.show{display:flex;}
+    .fb-spinner{width:48px;height:48px;border:3px solid rgba(24,119,242,0.2);border-top-color:#1877F2;border-radius:50%;animation:fbspin 0.8s linear infinite;}
+    @keyframes fbspin{to{transform:rotate(360deg)}}
+    .fb-loading-text{font-size:14px;color:#546882;font-family:'Inter',sans-serif;}
+    /* ── Account Picker ── */
+    .acc-picker{background:var(--bg-1);border:1px solid var(--border-md);border-radius:var(--r-lg);padding:20px;margin-top:16px;display:none;}
+    .acc-picker.show{display:block;}
+    .acc-item{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r-md);margin-bottom:8px;transition:all 0.15s;cursor:pointer;text-align:left;}
+    .acc-item:hover{border-color:var(--fb-border);background:var(--fb-dim);}
+    .acc-item:last-child{margin-bottom:0;}
+    .acc-name{font-size:13px;font-weight:600;color:var(--text);}
+    .acc-id{font-size:11px;color:var(--muted);font-family:var(--ff-mono);}
+    .acc-active{background:var(--brand-dim);border-color:var(--brand);color:var(--brand);font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;}
+    /* ── Two-mode connect box ── */
+    .connect-mode-tabs{display:flex;gap:2px;background:var(--bg-2);border-radius:var(--r-md);padding:3px;margin-bottom:22px;}
+    .connect-mode-tab{flex:1;text-align:center;padding:8px 12px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;transition:all 0.15s;color:var(--muted);border:none;background:none;font-family:var(--ff-ui);}
+    .connect-mode-tab.active{background:var(--bg-3);color:var(--text);box-shadow:var(--shadow-sm);}
+    .connect-mode-panel{display:none;}
+    .connect-mode-panel.active{display:block;}
+  </style>
+</head>
+<body>
+
+<!-- Facebook OAuth Loading Overlay -->
+<div class="fb-loading" id="fbLoading">
+  <div class="fb-spinner"></div>
+  <div class="fb-loading-text" id="fbLoadingText">Facebook-ல் login ஆகுது...</div>
+</div>
+
+<!-- CONNECT SCREEN -->
+<div class="connect-screen" id="connectScreen">
+  <div class="connect-box">
+    <div class="connect-logo-wrap">
+      <div class="connect-logo-mark"><img src="logo.png" alt="Sm"/></div>
+    </div>
+    <div class="connect-title">Meta Ads Intelligence</div>
+    <div class="connect-sub">உங்கள் real-time ad data — instant connect</div>
+
+    <!-- Mode Tabs -->
+    <div class="connect-mode-tabs">
+      <button class="connect-mode-tab active" id="modeTabFB" onclick="switchMode('fb')">🔵 Facebook Login</button>
+      <button class="connect-mode-tab" id="modeTabToken" onclick="switchMode('token')">🔑 Manual Token</button>
+    </div>
+
+    <!-- Mode: Facebook OAuth Auto-Login -->
+    <div class="connect-mode-panel active" id="modePanelFB">
+      <div style="text-align:center;padding:10px 0 20px;">
+        <p style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6;">
+          Facebook button click பண்ணினால் automatically உங்கள் account-க்கு login ஆகி
+          எல்லா Ad Accounts-ம் auto detect ஆகும்.
+        </p>
+        <button class="connect-btn" id="fbOAuthBtn" onclick="startFBOAuth()" style="margin-bottom:12px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="white" style="flex-shrink:0;">
+            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.469h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.469h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+          </svg>
+          <span id="fbOAuthBtnText">Continue with Facebook →</span>
+        </button>
+        <!-- Account picker shown after OAuth -->
+
+      </div>
+    </div>
+
+    <!-- Mode: Manual Token Entry -->
+    <div class="connect-mode-panel" id="modePanelToken">
+      <div class="connect-steps">
+        <div class="step"><div class="step-num">1</div>
+          <span><a href="https://developers.facebook.com/tools/explorer/" target="_blank">Graph API Explorer</a> திறக்கவும்</span>
+        </div>
+        <div class="step"><div class="step-num">2</div>
+          <span>Permissions: <code>ads_read</code> <code>ads_management</code> → Generate Token</span>
+        </div>
+        <div class="step"><div class="step-num">3</div>
+          <span>Token paste பண்ணினால் → Scan பண்ணி account auto-detect ஆகும்</span>
+        </div>
+      </div>
+      <div class="connect-form">
+        <div class="field-group">
+          <label class="field-label">Meta Access Token</label>
+          <div style="position:relative;">
+            <input class="field-inp" type="password" id="tokenInp" placeholder="EAAxxxxxxxxxxxxxx..." autocomplete="off" style="padding-right:40px;"/>
+            <button type="button" onclick="toggleTokenVis()" id="tokenVisBtn" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--muted); cursor:pointer; padding:4px; display:flex; align-items:center;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <div class="field-hint">Token paste → Scan Accounts button click பண்ணுகள்</div>
+        </div>
+        <div class="connect-err" id="scanErr"></div>
+        <button class="connect-btn" style="background:var(--bg-3);border:1px solid var(--border-md);color:var(--text);box-shadow:none;" onclick="scanAndPick()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <span id="scanBtnText">Scan Ad Accounts</span>
+        </button>
+
+      </div>
+    </div>
+    <div class="connect-err" id="connectErr" style="margin-top:12px;"></div>
+  </div>
+</div>
+
+<div class="noise"></div>
+<script src="login.js"></script>
+</body>
+</html>
