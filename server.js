@@ -99,9 +99,19 @@ wss.on("connection", (ws) => {
       if (msg.type === "auth") {
         ws.token = msg.token;
         ws.accountId = msg.accountId;
-        ws.datePreset = "today";
+        ws.datePreset = msg.datePreset || "today";
+        ws.runCount = 1;
+        console.log("WS Authenticated for:", ws.accountId, "Date:", ws.datePreset);
         await syncNow(ws);
         startSyncWorker(ws);
+      }
+      if (msg.type === "update_date") {
+        ws.datePreset = msg.datePreset;
+        ws.runCount = 1;
+        await syncNow(ws);
+      }
+      if (msg.type === "refresh") {
+        await syncNow(ws);
       }
       if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong" }));
     } catch(e) {}
@@ -113,13 +123,14 @@ async function syncNow(ws) {
   if (!ws.token || !ws.accountId) return;
   try {
     const data = await fetchAllMeta(ws.token, ws.accountId, ws.datePreset);
-    ws.send(JSON.stringify({ type: "data", data, runCount: 1 }));
+    ws.send(JSON.stringify({ type: "data", data, runCount: ws.runCount || 1 }));
+    ws.runCount = (ws.runCount || 1) + 1;
   } catch(e) {}
 }
 
 function startSyncWorker(ws) {
   clearInterval(ws.syncTimer);
-  ws.syncTimer = setInterval(() => syncNow(ws), 30000);
+  ws.syncTimer = setInterval(() => syncNow(ws), 15000);
 }
 
 async function fetchAllMeta(token, accId, datePreset) {

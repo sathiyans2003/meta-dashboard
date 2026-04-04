@@ -17,25 +17,20 @@ let currentSort = {
 // ══════════════════════════════════════════════════════════════
 // INITIAL AUTH CHECK
 // ══════════════════════════════════════════════════════════════
-window.onload = async () => {
-  loadColPrefs();
-  
-  // Multi-user: Check localStorage first
+window.onload = () => {
   currentToken = localStorage.getItem("meta_token");
   currentAccountId = localStorage.getItem("meta_account_id");
-  const datePreset = localStorage.getItem("meta_date_preset") || "today";
 
   if (!currentToken || !currentAccountId) {
     window.location.href = "index.html"; 
     return;
   }
-
-  // Set initial UI state
+  
+  loadColPrefs();
+  const datePreset = localStorage.getItem("meta_date_preset") || "today";
   if (document.getElementById("datePresetSel")) {
     document.getElementById("datePresetSel").value = datePreset;
   }
-
-  // Start WebSocket and load data
   connect();
 };
 
@@ -246,19 +241,20 @@ function connect() {
 
 function scheduleReconn() { reconn = setTimeout(connect, 5000); }
 
-async function disconnectFacebook() {
-  try {
-    const res = await fetch(`${API}/disconnect`, { 
-      method:"POST",
-      headers: {
-        "x-meta-token": currentToken,
-        "x-meta-account-id": currentAccountId
-      }
-    });
-    const json = await res.json();
-    if (json.ok) window.location.href = "index.html";
-    else alert("Disconnect failed: " + (json.error || "Unknown error"));
-  } catch(err) { alert("Error: " + err.message); }
+function disconnectFacebook() {
+  if (!confirm("Disconnect pandhal ellaa data clear aagum. Continue?")) return;
+  // Stateless clean up: Just clear local storage and go home
+  localStorage.removeItem("meta_token");
+  localStorage.removeItem("meta_account_id");
+  localStorage.removeItem("meta_date_preset");
+  window.location.href = "index.html";
+}
+
+function refreshData() {
+  if (ws && ws.readyState === 1) {
+    setStatus("wait");
+    ws.send(JSON.stringify({ type: "refresh" }));
+  }
 }
 
 function setStatus(s) {
