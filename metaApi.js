@@ -205,7 +205,10 @@ function parseMetrics(d) {
   const purchCount = parseFloat(getSum(ac, ['purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase']));
   const cpPurch = purchCount > 0 ? (spend / purchCount) : 0;
 
-  const leadCount = parseFloat(getSum(ac, ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 'onsite_conversion.total_lead_value']));
+  const leadCount = parseFloat(getSum(ac, [
+    'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 
+    'onsite_conversion.total_lead_value', 'complete_registration', 'offsite_conversion.fb_pixel_complete_registration'
+  ]));
   const cpLead = leadCount > 0 ? (spend / leadCount) : 0;
 
   const msgCount = parseFloat(getSum(ac, ['onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started_1d']));
