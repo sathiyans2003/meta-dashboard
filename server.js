@@ -90,8 +90,9 @@ app.get("/auth/facebook", (req, res) => {
 app.get("/auth/callback", async (req, res) => {
   const { code } = req.query;
   try {
+    const appId = process.env.META_APP_ID; 
+    const appSecret = process.env.META_APP_SECRET;
     const host = req.get("host"); 
-    // Force HTTPS for production redirects to match Meta settings
     const redirect = `https://${host}/auth/callback`;
     const axios = require("axios");
 
