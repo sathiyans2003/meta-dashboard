@@ -17,9 +17,15 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// ─── Explicit root routes for Vercel compatibility ────────────────────────────
-app.get("/",           (_, res) => res.sendFile(path.join(__dirname, "index.html")));
-app.get("/dashboard",  (_, res) => res.sendFile(path.join(__dirname, "dashboard.html")));
+// ─── Explicit root routes for Vercel/Render compatibility ─────────────────────────
+app.get("/",           (_, res) => {
+  if (CONFIG.token) return res.redirect("/dashboard.html");
+  res.sendFile(path.join(__dirname, "index.html"));
+});
+app.get("/dashboard",  (_, res) => {
+  if (!CONFIG.token) return res.redirect("/");
+  res.sendFile(path.join(__dirname, "dashboard.html"));
+});
 app.get("/explorer",   (_, res) => res.sendFile(path.join(__dirname, "explorer.html")));
 
 const PORT = process.env.PORT || 4000;

@@ -100,16 +100,24 @@ async function connectAccount(token, accountId, datePreset) {
 
 // Auto-navigate to dashboard if ALREADY connected
 window.onload = async () => {
-  try {
-    // Check if server is already connected (auto-connect from .env)
-    const r = await fetch(`${API}/status`);
-    const s = await r.json();
-    if (s.connected) {
-      showAutoConnecting("உங்கள் account already connected! Dashboard →");
-      setTimeout(() => { window.location.href = "dashboard.html"; }, 900);
-      return;
-    }
-  } catch(e) {}
+  const checkStatus = async () => {
+    try {
+      const r = await fetch(`${API}/status`);
+      const s = await r.json();
+      if (s.connected) {
+        showAutoConnecting("Redirecting to Dashboard...");
+        window.location.href = "dashboard.html";
+        return true;
+      }
+    } catch(e) {}
+    return false;
+  };
+
+  // Check immediately
+  if (await checkStatus()) return;
+
+  // Retry once after 2s for auto-connect systems
+  setTimeout(checkStatus, 2000);
 };
 
 function showAutoConnecting(msg) {
