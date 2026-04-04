@@ -5,7 +5,6 @@ const path = require("path");
 const http = require("http");
 const WebSocket = require("ws");
 const { fetchAccountSummary, fetchCampaigns, fetchAdSets, fetchAds } = require("./metaApi");
-const { syncAll } = require("./sheetsApi");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -76,9 +75,9 @@ app.get("/auth/callback", async (req, res) => {
     });
     const token = longRes.data.access_token;
     const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { 
-      params: { fields: "id,name,account_status,currency,timezone_name", access_token: token, limit: 50 } 
+      params: { fields: "id,name,account_status,currency,timezone_name,timezone_offset_hours_utc", access_token: token, limit: 500 } 
     });
-    const accounts = (accRes.data?.data || []);
+    const accounts = accRes.data?.data || [];
 
     res.send(`<html><body><script>
       if (window.opener) { 
@@ -87,7 +86,7 @@ app.get("/auth/callback", async (req, res) => {
       window.close();
     </script></body></html>`);
   } catch (err) {
-    console.error("Meta Account Fetch Error:", err.response?.data || err.message);
+    console.error("Auth Callback Account Fetch Error:", err.response?.data || err.message);
     res.status(400).send(`<h3>OAuth Error</h3><p>${err.message}</p>`);
   }
 });
@@ -103,6 +102,24 @@ wss.on("connection", (ws) => {
         ws.datePreset = msg.datePreset || "today";
         ws.runCount = 1;
         console.log("WS Authenticated for:", ws.accountId, "Date:", ws.datePreset);
+        
+        // Fetch ALL accounts for the client modal
+        const axios = require("axios");
+        try {
+          const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { 
+            params: { fields: "id,name,account_status,currency,timezone_name,timezone_offset_hours_utc", access_token: ws.token, limit: 500 } 
+          });
+          const allAccounts = accRes.data?.data || [];
+          const activeAcc = allAccounts.find(a => a.id === ws.accountId) || allAccounts[0];
+
+          ws.send(JSON.stringify({ 
+            type: "connected", 
+            accountInfo: { ...activeAcc, allAccounts }
+          }));
+        } catch (e) {
+          console.error("WS Account Fetch Error:", e.response?.data || e.message);
+        }
+
         await syncNow(ws);
         startSyncWorker(ws);
       }
@@ -144,7 +161,7 @@ async function fetchAllMeta(token, accId, datePreset) {
   return { summary, campaigns, adsets, ads };
 }
 
-// 404 Catch-all (IMPORTANT)
+// 404 Catch-all
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
