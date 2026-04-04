@@ -91,12 +91,28 @@ app.get("/auth/callback", async (req, res) => {
   const { code } = req.query;
   try {
     const appId = process.env.META_APP_ID; const appSecret = process.env.META_APP_SECRET;
-    const host = req.get("host"); const protocol = req.headers["x-forwarded-proto"] || req.protocol;
-    const redirect = encodeURIComponent(`${protocol}://${host}/auth/callback`);
+    const host = req.get("host"); 
+    const protocol = req.headers["x-forwarded-proto"] || req.protocol;
+    const redirect = `${protocol}://${host}/auth/callback`; // No manual encoding here
     const axios = require("axios");
 
-    const tokenRes = await axios.get(`https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&redirect_uri=${redirect}&client_secret=${appSecret}&code=${code}`);
-    const longRes = await axios.get(`https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${tokenRes.data.access_token}`);
+    const tokenRes = await axios.get(`https://graph.facebook.com/v19.0/oauth/access_token`, {
+      params: {
+        client_id: appId,
+        redirect_uri: redirect,
+        client_secret: appSecret,
+        code: code
+      }
+    });
+
+    const longRes = await axios.get(`https://graph.facebook.com/v19.0/oauth/access_token`, {
+      params: {
+        grant_type: "fb_exchange_token",
+        client_id: appId,
+        client_secret: appSecret,
+        fb_exchange_token: tokenRes.data.access_token
+      }
+    });
     const token = longRes.data.access_token;
 
     const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { params: { fields: "id,name,account_status,currency,timezone_name", access_token: token, limit: 50 } });
