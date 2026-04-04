@@ -79,20 +79,20 @@ function getResultsCount(actions = [], objective) {
   // 2. Fallback: Sum core conversion metrics if objective is unknown or fallback needed
   const coreConversions = [
     'purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase',
-    'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead',
+    'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 'onsite_conversion.total_lead_value',
     'onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started_1d',
-    'complete_registration', 'offsite_conversion.fb_pixel_complete_registration'
+    'complete_registration', 'offsite_conversion.fb_pixel_complete_registration', 'submit_application', 'offsite_conversion.fb_pixel_custom'
   ];
 
   let coreSum = 0;
   let foundCore = false;
-  coreConversions.forEach(t => {
+  for (const t of coreConversions) {
     const f = actions.find(a => a.action_type === t);
     if (f) {
       coreSum += parseFloat(f.value || 0);
       foundCore = true;
     }
-  });
+  }
 
   if (foundCore && coreSum > 0) return coreSum;
 
