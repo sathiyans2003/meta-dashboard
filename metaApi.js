@@ -39,29 +39,38 @@ function getResultsCount(actions = [], objective) {
   const obj = String(objective || "").toUpperCase();
 
   const map = {
-    'OUTCOME_SALES': ['purchase', 'onsite_conversion.purchase', 'onsite_conversion.purchase_grouped_60d'],
-    'OUTCOME_LEADS': ['lead', 'onsite_conversion.lead_grouped', 'onsite_conversion.total_lead_value'],
-    'OUTCOME_ENGAGEMENT': ['onsite_conversion.messaging_conversation_started_7d', 'post_engagement', 'page_engagement'],
+    'OUTCOME_SALES': ['purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase'],
+    'OUTCOME_LEADS': ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 'onsite_conversion.total_lead_value'],
+    'OUTCOME_ENGAGEMENT': ['onsite_conversion.messaging_conversation_started_7d', 'post_engagement', 'page_engagement', 'onsite_conversion.messaging_conversation_started_1d'],
     'OUTCOME_TRAFFIC': ['landing_page_view', 'link_click'],
     'OUTCOME_AWARENESS': ['reach', 'impressions'],
     'OUTCOME_APP_PROMOTION': ['app_install']
   };
 
-  // 1. If specific objective is known, pick the top prioritized action
+  // 1. If specific objective is known, sum the relevant action types
   if (obj && map[obj]) {
     const types = map[obj];
+    let totalValue = 0;
+    let foundAny = false;
     for (const t of types) {
       const f = actions.find(a => a.action_type === t);
-      if (f && parseFloat(f.value) > 0) return parseFloat(f.value);
+      if (f) {
+        totalValue += parseFloat(f.value || 0);
+        foundAny = true;
+      }
     }
-    return 0; // If a Sales campaign has 0 sales, it has 0 results (ignore clicks)
+    // If it's a Sales/Lead/Messaging objective, return the sum (even if 0) to match campaign goal
+    if (['OUTCOME_SALES', 'OUTCOME_LEADS', 'OUTCOME_ENGAGEMENT'].includes(obj)) {
+      return totalValue;
+    }
+    if (foundAny && totalValue > 0) return totalValue;
   }
 
-  // 2. If no objective or unknown (Summary), sum the "Real" Conversions
+  // 2. Fallback: Sum core conversion metrics if objective is unknown or fallback needed
   const coreConversions = [
-    'purchase', 'onsite_conversion.purchase',
-    'lead', 'onsite_conversion.lead_grouped',
-    'onsite_conversion.messaging_conversation_started_7d'
+    'purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase',
+    'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead',
+    'onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started_1d'
   ];
 
   let coreSum = 0;
@@ -74,14 +83,19 @@ function getResultsCount(actions = [], objective) {
     }
   });
 
-  if (foundCore) return coreSum;
+  if (foundCore && coreSum > 0) return coreSum;
 
   // 3. Last fallback (Traffic ads etc)
+  const lp = actions.find(a => a.action_type === 'landing_page_view');
+  if (lp && parseFloat(lp.value) > 0) return parseFloat(lp.value);
+  
   const lc = actions.find(a => a.action_type === 'link_click');
   return parseFloat(lc?.value || 0);
 }
 
-function applyDate(params, datePreset) {
+function applyDate(params, datePreset, isNested = false) {
+  if (isNested) return params; // Nested insights handle their own daterange via field string
+  
   if (!datePreset || datePreset === "today") {
     params.date_preset = "today";
   } else if (typeof datePreset === "string") {
@@ -140,35 +154,29 @@ async function validateAccount(accountId, token) {
 // ─── Account Summary ──────────────────────────────────────────────────────────
 
 const SUMMARY_FIELDS = [
-  "objective", "results", "impressions", "clicks", "unique_clicks", "unique_ctr", "ctr",
-  "spend", "reach", "frequency", "cpm", "cpc", "cpp",
-  "actions", "action_values",
-  "purchase_roas", "website_purchase_roas", "cost_per_action_type",
+  "actions", "action_values", "impressions", "clicks", "spend", "reach",
+  "frequency", "cpm", "cpc", "cpp", "purchase_roas", "website_purchase_roas",
   "quality_ranking", "engagement_rate_ranking", "conversion_rate_ranking",
-  "video_thruplay_watched_actions", "video_p25_watched_actions",
-  "video_p50_watched_actions", "video_p75_watched_actions",
-  "video_p95_watched_actions", "video_p100_watched_actions",
-  "outbound_clicks", "outbound_clicks_ctr",
-  "inline_link_clicks", "inline_link_click_ctr", "cost_per_unique_click",
-  "date_start", "date_stop"
+  "video_p100_watched_actions", "date_start", "date_stop"
 ].join(",");
 
 const ITEM_FIELDS = [
-  "objective", "account_currency", "results",
-  "impressions", "clicks", "unique_clicks", "unique_ctr", "ctr",
-  "spend", "reach", "frequency", "cpm", "cpc", "cpp",
-  "actions", "action_values",
-  "purchase_roas", "website_purchase_roas", "cost_per_action_type",
+  "actions", "action_values", "impressions", "clicks", "spend", "reach",
+  "frequency", "cpm", "cpc", "cpp", "purchase_roas", "website_purchase_roas",
   "quality_ranking", "engagement_rate_ranking", "conversion_rate_ranking",
-  "video_thruplay_watched_actions", "video_p25_watched_actions",
-  "video_p50_watched_actions", "video_p75_watched_actions",
-  "video_p95_watched_actions", "video_p100_watched_actions",
-  "outbound_clicks", "outbound_clicks_ctr",
-  "inline_link_clicks", "inline_link_click_ctr", "cost_per_unique_click",
-  "date_start", "date_stop"
+  "video_p100_watched_actions", "date_start", "date_stop"
 ].join(",");
 
 
+
+function getSum(actions = [], types = []) {
+  let sum = 0;
+  types.forEach(t => {
+    const f = actions.find(a => a.action_type === t);
+    if (f) sum += parseFloat(f.value || 0);
+  });
+  return sum.toFixed(2);
+}
 
 function parseMetrics(d) {
   const ac = d.actions || [];
@@ -183,14 +191,16 @@ function parseMetrics(d) {
   const cpRes = resCount > 0 ? (spend / resCount) : 0;
   const resRate = imps > 0 ? ((resCount / imps) * 100).toFixed(2) : "0";
 
-  const purchCount = parseFloat(getAction(ac, "purchase"));
+  const purchCount = parseFloat(getSum(ac, ['purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase']));
   const cpPurch = purchCount > 0 ? (spend / purchCount) : 0;
 
-  const leadCount = parseFloat(getAction(ac, "lead"));
+  const leadCount = parseFloat(getSum(ac, ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 'onsite_conversion.total_lead_value']));
   const cpLead = leadCount > 0 ? (spend / leadCount) : 0;
 
-  const msgCount = parseFloat(getAction(ac, "onsite_conversion.messaging_conversation_started_7d"));
+  const msgCount = parseFloat(getSum(ac, ['onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started_1d']));
   const cpMsg = msgCount > 0 ? (spend / msgCount) : 0;
+
+  const purchValue = getSum(av, ['purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase']);
 
   return {
     status: d.status || "UNKNOWN",
@@ -206,7 +216,7 @@ function parseMetrics(d) {
 
     purchases: String(purchCount),
     costPerPurchase: fmt(cpPurch),
-    purchaseValue: getAction(av, "purchase"),
+    purchaseValue: purchValue,
     purchaseRoas: getRoas(roas),
 
     leads: String(leadCount),
@@ -217,14 +227,10 @@ function parseMetrics(d) {
 
     linkClicks: getAction(ac, "link_click"),
 
-    addToCart: getAction(ac, "add_to_cart"),
-    initiateCheckout: getAction(ac, "initiate_checkout"),
+    addToCart: getSum(ac, ['add_to_cart', 'onsite_conversion.add_to_cart', 'offsite_conversion.fb_pixel_add_to_cart']),
+    initiateCheckout: getSum(ac, ['initiate_checkout', 'onsite_conversion.initiate_checkout', 'offsite_conversion.fb_pixel_initiate_checkout']),
     landingPageViews: getAction(ac, "landing_page_view"),
 
-    messagingConversations: String(msgCount),
-    costPerConversation: fmt(cpMsg),
-
-    linkClicks: getAction(ac, "link_click"),
     postEngagement: getAction(ac, "post_engagement"),
     videoViews: getAction(ac, "video_view"),
     v100: d.video_p100_watched_actions?.[0]?.value || "0",
@@ -248,13 +254,24 @@ async function fetchAccountSummary(accountId, token, datePreset = "today") {
   return parseMetrics(d);
 }
 
+function getInsightsField(datePreset) {
+  if (!datePreset || datePreset === "today") return `insights.date_preset(today){${ITEM_FIELDS}}`;
+  if (typeof datePreset === "string") return `insights.date_preset(${datePreset}){${ITEM_FIELDS}}`;
+  if (datePreset?.since && datePreset?.until) {
+    // Stringify JSON carefully for inline GraphQL-like syntax
+    const tr = JSON.stringify({ since: datePreset.since, until: datePreset.until });
+    return `insights.time_range(${tr}){${ITEM_FIELDS}}`;
+  }
+  return `insights{${ITEM_FIELDS}}`;
+}
+
 // ─── Campaigns ────────────────────────────────────────────────────────────────
 
 async function fetchCampaigns(accountId, token, datePreset = "today") {
   const params = applyDate({
-    fields: `id,name,status,objective,daily_budget,lifetime_budget,insights{${ITEM_FIELDS}}`,
+    fields: `id,name,status,objective,daily_budget,lifetime_budget,${getInsightsField(datePreset)}`,
     limit: 100,
-  }, datePreset);
+  }, datePreset, true); // true = isNested, don't pass date_preset to top level if handled in fields
 
   const raw = await fetchAll(accountId, token, "campaigns", params);
 
@@ -276,9 +293,9 @@ async function fetchCampaigns(accountId, token, datePreset = "today") {
 
 async function fetchAdSets(accountId, token, datePreset = "today") {
   const params = applyDate({
-    fields: `id,name,status,campaign{name},daily_budget,lifetime_budget,insights{${ITEM_FIELDS}}`,
+    fields: `id,name,status,campaign{name},daily_budget,lifetime_budget,${getInsightsField(datePreset)}`,
     limit: 100,
-  }, datePreset);
+  }, datePreset, true);
 
   const raw = await fetchAll(accountId, token, "adsets", params);
 
@@ -300,9 +317,9 @@ async function fetchAdSets(accountId, token, datePreset = "today") {
 
 async function fetchAds(accountId, token, datePreset = "today") {
   const params = applyDate({
-    fields: `id,name,status,adset{name},campaign{name},insights{${ITEM_FIELDS}}`,
+    fields: `id,name,status,adset{name},campaign{name},${getInsightsField(datePreset)}`,
     limit: 100,
-  }, datePreset);
+  }, datePreset, true);
 
   const raw = await fetchAll(accountId, token, "ads", params);
 

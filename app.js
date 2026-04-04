@@ -205,6 +205,10 @@ async function applyCustomDate() {
 
 async function changeDatePreset(v) {
   setStatus("wait");
+  // Show spinner on the refresh button too
+  const btn = document.getElementById("refreshBtn");
+  if (btn) btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="animation:spin 0.8s linear infinite"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Updating...`;
+  
   try { 
     await fetch(`${API}/daterange`, { 
       method: "POST", 
@@ -213,6 +217,7 @@ async function changeDatePreset(v) {
     }); 
   } catch(e) {
     console.error("Date change failed:", e);
+    setStatus("err");
   }
 }
 
@@ -477,9 +482,11 @@ function handleSort(tabPrefix, key) {
 function renderOverview(s, isFiltered = false) {
   const kpiTitle = document.querySelector("#tab-overview h2");
   if (kpiTitle) {
+    const range = s.dateStart && s.dateStop ? `${s.dateStart} — ${s.dateStop}` : "";
+    const rangeLabel = range ? `<span style="color:var(--muted); font-size:11px; margin-left:12px; font-weight:400;">Range: ${range}</span>` : "";
     kpiTitle.innerHTML = isFiltered 
-      ? `Top KPIs <span style="color:var(--fb); font-size:12px; margin-left:10px;">(Filtered by ${selectedCampaignIds.size} Selected)</span>`
-      : `Top KPIs <span style="color:var(--muted); font-size:12px; margin-left:10px;">(Account Total)</span>`;
+      ? `Top KPIs ${rangeLabel} <span style="color:var(--fb); font-size:11px; margin-left:10px; font-weight:700;">• FILTERED</span>`
+      : `Top KPIs ${rangeLabel} <span style="color:var(--muted); font-size:11px; margin-left:10px; font-weight:400;">• ACCOUNT TOTAL</span>`;
   }
   const kpiIds = activeColIds["overview"] || ["spend", "impressions", "clicks", "ctr", "purchaseRoas", "cpc", "cpm", "reach"];
   const kpis = kpiIds.map(id => {
@@ -602,9 +609,9 @@ const adCols = [ { h:"Ad ID", k:"id", f:"id" }, { h:"Ad Name", k:"name", f:"name
 
 let activeColIds = {
   overview: ["spend", "results", "costPerResult", "impressions", "clicks", "ctr", "purchaseRoas", "reach"],
-  camp: ["id", "name", "status", "results", "costPerResult", "spend", "impressions", "ctr", "purchases", "purchaseRoas"],
-  adset: ["id", "name", "status", "results", "costPerResult", "spend", "ctr", "cpm", "cpc", "purchases", "purchaseRoas"],
-  ad: ["id", "name", "status", "results", "costPerResult", "spend", "ctr", "cpm", "cpc", "purchases", "purchaseRoas", "linkClicks"]
+  camp: ["id", "name", "status", "results", "costPerResult", "spend", "impressions", "ctr", "purchases", "purchaseRoas", "dateStart", "dateStop"],
+  adset: ["id", "name", "status", "results", "costPerResult", "spend", "ctr", "cpm", "cpc", "purchases", "purchaseRoas", "dateStart", "dateStop"],
+  ad: ["id", "name", "status", "results", "costPerResult", "spend", "ctr", "cpm", "cpc", "purchases", "purchaseRoas", "linkClicks", "dateStart", "dateStop"]
 };
 
 function loadColPrefs() {
@@ -659,13 +666,23 @@ function openColSettings(tabPrefix) {
   if (tabPrefix === "overview") all = ALL_METRICS;
   else all = { camp: campCols, adset: adsetCols, ad: adCols }[tabPrefix];
 
-  const activeIds = activeColIds[tabPrefix] || [];
   const ttls = { overview:"Top KPI Strip", camp:"Campaign Columns", adset:"Ad Set Columns", ad:"Ad Columns" };
   document.getElementById("colModalTtl").textContent = ttls[tabPrefix] || "Customize Columns";
 
+  let fixedIds = [];
+  if (tabPrefix === "camp") fixedIds = ["id", "name", "status"];
+  else if (tabPrefix === "adset") fixedIds = ["id", "name", "campaignName", "status"];
+  else if (tabPrefix === "ad") fixedIds = ["id", "name", "adsetName", "campaignName", "status"];
+
+  // Exclude fixed columns from manual configuration
+  const configurableCols = all.filter(c => !fixedIds.includes(c.k));
+  
+  const allActiveIds = activeColIds[tabPrefix] || [];
+  const activeConfigurableIds = allActiveIds.filter(id => !fixedIds.includes(id));
+
   // Build list: active columns first (in their saved order), then the rest
-  const activeCols = activeIds.map(id => all.find(c => c.k === id)).filter(Boolean);
-  const inactiveCols = all.filter(c => !activeIds.includes(c.k));
+  const activeCols = activeConfigurableIds.map(id => configurableCols.find(c => c.k === id)).filter(Boolean);
+  const inactiveCols = configurableCols.filter(c => !activeConfigurableIds.includes(c.k));
   const ordered = [...activeCols, ...inactiveCols];
 
   // Presets
@@ -685,7 +702,7 @@ function openColSettings(tabPrefix) {
   }
 
   document.getElementById("colModalList").innerHTML = presetsHtml + ordered.map((c, i) => {
-    const isChecked = activeIds.includes(c.k);
+    const isChecked = activeConfigurableIds.includes(c.k);
     return `
       <label class="col-opt${isChecked ? ' checked' : ''}" draggable="true" data-key="${c.k}">
         <span class="col-drag-handle" title="Drag to reorder">
@@ -801,6 +818,11 @@ function closeColSettings() {
 function saveColSettings() {
   if (!currentColEditingTab) return;
 
+  let finalIds = [];
+  if (currentColEditingTab === "camp") finalIds = ["id", "name", "status"];
+  else if (currentColEditingTab === "adset") finalIds = ["id", "name", "campaignName", "status"];
+  else if (currentColEditingTab === "ad") finalIds = ["id", "name", "adsetName", "campaignName", "status"];
+
   // Respect drag order: iterate DOM elements in their current order
   const opts = document.querySelectorAll("#colModalList .col-opt[draggable]");
   const selected = [];
@@ -815,12 +837,14 @@ function saveColSettings() {
     });
   }
 
-  if (selected.length === 0) {
+  finalIds = [...finalIds, ...selected];
+
+  if (finalIds.length === 0) {
     alert("Please select at least one column.");
     return;
   }
 
-  activeColIds[currentColEditingTab] = selected;
+  activeColIds[currentColEditingTab] = finalIds;
   try { localStorage.setItem("metaColPrefs", JSON.stringify(activeColIds)); } catch(e){}
 
   closeColSettings();
@@ -828,7 +852,7 @@ function saveColSettings() {
   // Re-render
   if (!data) return;
   if (currentColEditingTab === "overview") {
-    renderOverview(data.summary);
+    applySelectionFilter();
   } else {
     const map = { camp: "campaigns", adset: "adsets", ad: "ads" };
     renderTable(currentColEditingTab, getFilteredData(currentColEditingTab), getActiveCols(currentColEditingTab));
@@ -890,30 +914,38 @@ function renderTable(id, rows, cols) {
 
   // Calculate Totals row
   let totalRow = { name: "TOTAL ALL", status: "", isTotal: true };
-  cols.forEach(c => {
-    if (["id", "name", "status", "objective", "campaignName", "adsetName"].includes(c.k)) return;
+  
+  // Base sum across ALL known metrics to ensure derived metrics calculate properly
+  // We extract all keys from ALL_METRICS to do the summation
+  const allMetricKeys = ALL_METRICS.map(m => m.k);
+  allMetricKeys.forEach(k => {
     let sum = 0;
     rows.forEach(r => {
-      let v = parseFloat(r[c.k] || 0);
+      let v = parseFloat(r[k] || 0);
       if (!isNaN(v)) sum += v;
     });
-    totalRow[c.k] = sum;
+    totalRow[k] = sum;
   });
 
-  // Re-calculate averages for the total row
-  if (totalRow.spend && totalRow.impressions) {
-    if (totalRow.ctr !== undefined && totalRow.impressions > 0) 
-      totalRow.ctr = (totalRow.clicks / totalRow.impressions * 100).toFixed(2);
-    if (totalRow.cpm !== undefined && totalRow.impressions > 0) 
-      totalRow.cpm = (totalRow.spend / (totalRow.impressions / 1000)).toFixed(2);
-    if (totalRow.cpc !== undefined && totalRow.clicks > 0) 
-      totalRow.cpc = (totalRow.spend / totalRow.clicks).toFixed(2);
-    if (totalRow.resultRate !== undefined && totalRow.impressions > 0)
-      totalRow.resultRate = (totalRow.results / totalRow.impressions * 100).toFixed(2);
-    if (totalRow.purchaseRoas !== undefined && totalRow.spend > 0) {
-      const roas = (totalRow.purchaseValue / totalRow.spend);
-      totalRow.purchaseRoas = isNaN(roas) ? "0.00" : roas.toFixed(2);
-    }
+  // Re-calculate derived metrics correctly from the fully summed data
+  if (totalRow.spend !== undefined) {
+    totalRow.costPerResult = totalRow.results > 0 ? (totalRow.spend / totalRow.results).toFixed(2) : "0.00";
+    totalRow.costPerPurchase = totalRow.purchases > 0 ? (totalRow.spend / totalRow.purchases).toFixed(2) : "0.00";
+    totalRow.costPerLead = totalRow.leads > 0 ? (totalRow.spend / totalRow.leads).toFixed(2) : "0.00";
+    totalRow.costPerConversation = totalRow.messagingConversations > 0 ? (totalRow.spend / totalRow.messagingConversations).toFixed(2) : "0.00";
+    totalRow.cpc = totalRow.clicks > 0 ? (totalRow.spend / totalRow.clicks).toFixed(2) : "0.00";
+    totalRow.cpm = totalRow.impressions > 0 ? (totalRow.spend / (totalRow.impressions / 1000)).toFixed(2) : "0.00";
+    totalRow.purchaseRoas = totalRow.spend > 0 ? (totalRow.purchaseValue / totalRow.spend).toFixed(2) : "0.00";
+  }
+  
+  if (totalRow.impressions !== undefined) {
+    totalRow.ctr = totalRow.impressions > 0 ? ((totalRow.clicks / totalRow.impressions) * 100).toFixed(2) : "0.00";
+    totalRow.resultRate = totalRow.impressions > 0 ? ((totalRow.results / totalRow.impressions) * 100).toFixed(2) : "0.00";
+  }
+  
+  if (totalRow.reach !== undefined) {
+    totalRow.frequency = totalRow.reach > 0 ? (totalRow.impressions / totalRow.reach).toFixed(2) : "1.00";
+    totalRow.uniqueCtr = totalRow.reach > 0 ? ((totalRow.uniqueClicks / totalRow.reach) * 100).toFixed(2) : "0.00";
   }
 
   let totalTrHtml = cols.map(c=>`<td class="${tdClass(c.f)}">${fmtCell(totalRow[c.k],c.f)}</td>`).join("");

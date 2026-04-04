@@ -60,7 +60,7 @@ function startFBOAuth() {
 
 function showOAuthAccPicker(accounts) {
   const picker = document.getElementById("oauthAccPicker");
-  const list   = document.getElementById("oauthAccList");
+  const list = document.getElementById("oauthAccList");
   picker.classList.add("show");
   list.innerHTML = accounts.map(a => `
     <div class="acc-item" onclick="connectAccount('${oauthToken}','${a.id}','today')">
@@ -77,7 +77,7 @@ function showOAuthAccPicker(accounts) {
 async function scanAndPick() {
   const token = document.getElementById("tokenInp").value.trim();
   const errEl = document.getElementById("scanErr");
-  const btn   = document.getElementById("scanBtnText");
+  const btn = document.getElementById("scanBtnText");
   errEl.classList.remove("show");
 
   if (!token) { errEl.textContent = "Token paste பண்ணுங்கள்!"; errEl.classList.add("show"); return; }
@@ -108,7 +108,7 @@ async function scanAndPick() {
 
 function showTokenAccPicker(accounts, token) {
   const picker = document.getElementById("tokenAccPicker");
-  const list   = document.getElementById("tokenAccList");
+  const list = document.getElementById("tokenAccList");
   picker.classList.add("show");
   list.innerHTML = accounts.map(a => `
     <div class="acc-item" onclick="connectAccount('${token}','${a.id}','today')">
@@ -134,9 +134,9 @@ async function connectAccount(token, accountId, datePreset) {
       body: JSON.stringify({ token, accountId, datePreset: datePreset || "today" })
     });
     const json = await res.json();
-    
+
     document.getElementById("fbLoading").classList.remove("show");
-    
+
     if (!json.ok) {
       errEl.textContent = json.error || "Connection failed";
       errEl.classList.add("show"); return;
@@ -159,23 +159,63 @@ document.addEventListener("keydown", e => {
   }
 });
 
-// Auto-navigate to dashboard if ALREADY connected
+// Auto-navigate to dashboard if ALREADY connected OR if .env has full credentials
 window.onload = async () => {
   try {
+    // Step 1: Check if server is already connected (auto-connect from .env)
     const r = await fetch(`${API}/status`);
     const s = await r.json();
     if (s.connected) {
-      window.location.href = "dashboard.html";
+      // Already connected — go straight to dashboard
+      showAutoConnecting("உங்கள் account already connected! Dashboard →");
+      setTimeout(() => { window.location.href = "dashboard.html"; }, 900);
+      return;
     }
-  } catch(e) {}
+
+    // Step 2: Check env config to show/hide correct modes
+    const envRes = await fetch(`${API}/env-config`);
+    const env = await envRes.json();
+
+    // Hide Facebook OAuth tab if App ID not set in .env
+    if (!env.hasAppId) {
+      document.getElementById("modeTabFB").style.display = "none";
+      switchMode("token"); // Default to manual token
+    }
+
+    // If token + account both set but server not yet connected (first load race)
+    if (env.autoConnected) {
+      showAutoConnecting(".env credentials found — connecting...");
+      // Retry after 2s (server might still be initializing)
+      setTimeout(async () => {
+        try {
+          const r2 = await fetch(`${API}/status`);
+          const s2 = await r2.json();
+          if (s2.connected) {
+            showAutoConnecting("✅ Connected! Redirecting to Dashboard...");
+            setTimeout(() => { window.location.href = "dashboard.html"; }, 800);
+          } else {
+            hideAutoConnecting();
+          }
+        } catch (e) { hideAutoConnecting(); }
+      }, 2500);
+    }
+  } catch (e) { }
 };
+
+function showAutoConnecting(msg) {
+  document.getElementById("fbLoading").classList.add("show");
+  document.getElementById("fbLoadingText").textContent = msg || "Auto-connecting...";
+}
+function hideAutoConnecting() {
+  document.getElementById("fbLoading").classList.remove("show");
+}
 
 // Token field visibility toggle
 function toggleTokenVis() {
   const inp = document.getElementById("tokenInp");
   const btn = document.getElementById("tokenVisBtn");
   if (!inp || !btn) return;
-  
+
   if (inp.type === "password") {
     inp.type = "text";
     btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;

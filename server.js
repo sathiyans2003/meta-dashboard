@@ -18,7 +18,7 @@ app.use(express.json());
 app.use(express.static(__dirname));
 
 const PORT = process.env.PORT || 4000;
-const INTERVAL = parseInt(process.env.UPDATE_INTERVAL_SECONDS || "900") * 1000; // Default to 15 mins
+const INTERVAL = parseInt(process.env.UPDATE_INTERVAL_SECONDS || "300") * 1000; // Updated to 5 minutes (300 seconds)
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let CONFIG = {
@@ -57,6 +57,68 @@ async function runCycle() {
     ]);
 
     latestData  = { summary, campaigns, adsets, ads };
+    
+    // Aggregation fix for Account Results (Ensure Top KPIs match Campaign Objectives)
+    if (campaigns && campaigns.length > 0) {
+      let s = {
+        results: 0, purchases: 0, leads: 0, messagingConversations: 0, purchaseValue: 0,
+        spend: 0, impressions: 0, clicks: 0, reach: 0, linkClicks: 0, 
+        landingPageViews: 0, uniqueClicks: 0, videoViews: 0, postEngagement: 0, v100: 0,
+        dateStart: "", dateStop: ""
+      };
+      
+      campaigns.forEach(c => {
+        s.results += parseFloat(c.results || 0);
+        s.purchases += parseFloat(c.purchases || 0);
+        s.leads += parseFloat(c.leads || 0);
+        s.messagingConversations += parseFloat(c.messagingConversations || 0);
+        s.purchaseValue += parseFloat(c.purchaseValue || 0);
+        s.spend += parseFloat(c.spend || 0);
+        s.impressions += parseFloat(c.impressions || 0);
+        s.clicks += parseFloat(c.clicks || 0);
+        s.reach += parseFloat(c.reach || 0);
+        s.linkClicks += parseFloat(c.linkClicks || 0);
+        s.landingPageViews += parseFloat(c.landingPageViews || 0);
+        s.uniqueClicks += parseFloat(c.uniqueClicks || 0);
+        s.videoViews += parseFloat(c.videoViews || 0);
+        s.postEngagement += parseFloat(c.postEngagement || 0);
+        s.v100 += parseFloat(c.v100 || 0);
+
+        if (!s.dateStart || (c.dateStart && c.dateStart < s.dateStart)) s.dateStart = c.dateStart;
+        if (!s.dateStop || (c.dateStop && c.dateStop > s.dateStop)) s.dateStop = c.dateStop;
+      });
+      
+      // Update summary with aggregated source-of-truth
+      summary.spend = s.spend.toFixed(2);
+      summary.results = String(s.results);
+      summary.purchases = String(s.purchases);
+      summary.leads = String(s.leads);
+      summary.messagingConversations = String(s.messagingConversations);
+      summary.purchaseValue = s.purchaseValue.toFixed(2);
+      summary.impressions = String(s.impressions);
+      summary.clicks = String(s.clicks);
+      summary.reach = String(s.reach);
+      summary.linkClicks = String(s.linkClicks);
+      summary.landingPageViews = String(s.landingPageViews);
+      summary.uniqueClicks = String(s.uniqueClicks);
+      summary.videoViews = String(s.videoViews);
+      summary.postEngagement = String(s.postEngagement);
+      summary.v100 = String(s.v100);
+      summary.dateStart = s.dateStart;
+      summary.dateStop = s.dateStop;
+      
+      // Derived ratios
+      summary.ctr = s.impressions > 0 ? ((s.clicks / s.impressions) * 100).toFixed(2) : "0.00";
+      summary.cpc = s.clicks > 0 ? (s.spend / s.clicks).toFixed(2) : "0.00";
+      summary.cpm = s.impressions > 0 ? (s.spend / (s.impressions / 1000)).toFixed(2) : "0.00";
+      summary.costPerResult = s.results > 0 ? (s.spend / s.results).toFixed(2) : "0.00";
+      summary.costPerPurchase = s.purchases > 0 ? (s.spend / s.purchases).toFixed(2) : "0.00";
+      summary.purchaseRoas = s.spend > 0 ? (s.purchaseValue / s.spend).toFixed(2) : "0.00";
+      summary.frequency = s.reach > 0 ? (s.impressions / s.reach).toFixed(2) : "1.00";
+      summary.uniqueCtr = s.reach > 0 ? ((s.uniqueClicks / s.reach) * 100).toFixed(2) : "0.00";
+      summary.resultRate = s.impressions > 0 ? ((s.results / s.impressions) * 100).toFixed(2) : "0.00";
+    }
+
     lastUpdated = new Date().toISOString();
     status      = "ok";
 
@@ -300,8 +362,9 @@ app.get("/api/adsets",   (_, res) => latestData ? res.json(latestData.adsets)   
 app.get("/api/ads",      (_, res) => latestData ? res.json(latestData.ads)       : res.status(503).json({ error: "No data yet" }));
 
 app.post("/api/refresh", async (_, res) => {
-  res.json({ ok: true });
-  await runCycle();
+  // Reset timer to ensure next automatic sync starts from now
+  startLoop(); 
+  res.json({ ok: true, message: "Manual refresh started" });
 });
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -334,6 +397,64 @@ setInterval(() => {
   broadcast({ type: "countdown", remaining });
 }, 1000);
 
+// ─── API: Expose ENV config to frontend ──────────────────────────────────────
+app.get("/api/env-config", (_, res) => {
+  const appId     = process.env.META_APP_ID;
+  const hasAppId  = !!(appId && appId !== "your_meta_app_id_here");
+  const hasToken  = !!(process.env.META_ACCESS_TOKEN && process.env.META_ACCESS_TOKEN !== "your_meta_access_token_here");
+  const hasAccId  = !!(process.env.META_AD_ACCOUNT_ID && process.env.META_AD_ACCOUNT_ID !== "your_ad_account_id_here");
+  res.json({ hasAppId, hasToken, hasAccId, autoConnected: !!(hasToken && hasAccId) });
+});
+
+// ─── Auto-connect on startup if .env has credentials ─────────────────────────
+async function tryAutoConnect() {
+  const token   = process.env.META_ACCESS_TOKEN;
+  const accId   = process.env.META_AD_ACCOUNT_ID;
+
+  const tokenOk = token  && token  !== "your_meta_access_token_here";
+  const accOk   = accId  && accId  !== "your_ad_account_id_here";
+
+  if (!tokenOk || !accOk) {
+    console.log("  ⏳ No credentials in .env — waiting for manual connect\n");
+    return;
+  }
+
+  console.log("  🔄 .env credentials found — auto-connecting...\n");
+  try {
+    const tokenCheck = await validateToken(token);
+    if (!tokenCheck.ok) {
+      console.error(`  ❌ Auto-connect failed: Invalid token — ${tokenCheck.error}`);
+      return;
+    }
+
+    const accountId = String(accId).replace(/[^0-9]/g, "");
+    const accountCheck = await validateAccount(`act_${accountId}`, token);
+    if (!accountCheck.ok) {
+      console.error(`  ❌ Auto-connect failed: Invalid account — ${accountCheck.error}`);
+      return;
+    }
+
+    // Fetch all accounts for UI picker
+    let allAccounts = [];
+    try {
+      const axios = require("axios");
+      const r = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, {
+        params: { fields: "id,name,account_status,currency,timezone_name", access_token: token, limit: 50 }
+      });
+      allAccounts = (r.data?.data || []).filter(a => a.account_status === 1);
+    } catch (e) {}
+
+    CONFIG      = { token, accountId: `act_${accountId}`, datePreset: process.env.DATE_PRESET || "today" };
+    accountInfo = { ...accountCheck, allAccounts };
+    nextSync    = Date.now() + INTERVAL;
+
+    startLoop();
+    console.log(`  ✅ Auto-connected → ${accountCheck.name} (act_${accountId})\n`);
+  } catch (err) {
+    console.error(`  ❌ Auto-connect error: ${err.message}`);
+  }
+}
+
 // ─── Start Server ─────────────────────────────────────────────────────────────
 server.listen(PORT, () => {
   console.log(`\n╔══════════════════════════════════════════╗`);
@@ -343,6 +464,8 @@ server.listen(PORT, () => {
   console.log(`  API       → http://localhost:${PORT}/api`);
   console.log(`  WS        → ws://localhost:${PORT}`);
   console.log(`  Refresh   → every ${INTERVAL / 1000}s\n`);
-  console.log(`  ⏳ Waiting for token via POST /api/connect\n`);
-  console.log(`  💡 No META_APP_ID needed — token only!\n`);
+  console.log(`  💡 Meta App ID: ${process.env.META_APP_ID && process.env.META_APP_ID !== "your_meta_app_id_here" ? "✅ Set" : "❌ Not set (OAuth disabled)"}`);
+  console.log(`  💡 Access Token: ${process.env.META_ACCESS_TOKEN && process.env.META_ACCESS_TOKEN !== "your_meta_access_token_here" ? "✅ Set" : "❌ Not set"}`);
+  console.log(`  💡 Ad Account: ${process.env.META_AD_ACCOUNT_ID && process.env.META_AD_ACCOUNT_ID !== "your_ad_account_id_here" ? "✅ Set" : "❌ Not set"}\n`);
+  tryAutoConnect();
 });
