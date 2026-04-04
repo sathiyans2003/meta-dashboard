@@ -15,7 +15,12 @@ const wss = new WebSocketServer({ server });
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(__dirname));
+app.use(express.static(path.join(__dirname)));
+
+// ─── Explicit root routes for Vercel compatibility ────────────────────────────
+app.get("/",           (_, res) => res.sendFile(path.join(__dirname, "index.html")));
+app.get("/dashboard",  (_, res) => res.sendFile(path.join(__dirname, "dashboard.html")));
+app.get("/explorer",   (_, res) => res.sendFile(path.join(__dirname, "explorer.html")));
 
 const PORT = process.env.PORT || 4000;
 const INTERVAL = parseInt(process.env.UPDATE_INTERVAL_SECONDS || "300") * 1000; // Updated to 5 minutes (300 seconds)
