@@ -78,7 +78,7 @@ app.get("/auth/callback", async (req, res) => {
     const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { 
       params: { fields: "id,name,account_status,currency,timezone_name", access_token: token, limit: 50 } 
     });
-    const accounts = (accRes.data?.data || []).filter(a => a.account_status === 1);
+    const accounts = (accRes.data?.data || []);
 
     res.send(`<html><body><script>
       if (window.opener) { 
@@ -87,6 +87,7 @@ app.get("/auth/callback", async (req, res) => {
       window.close();
     </script></body></html>`);
   } catch (err) {
+    console.error("Meta Account Fetch Error:", err.response?.data || err.message);
     res.status(400).send(`<h3>OAuth Error</h3><p>${err.message}</p>`);
   }
 });
