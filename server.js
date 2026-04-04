@@ -130,7 +130,7 @@ async function syncNow(ws) {
 
 function startSyncWorker(ws) {
   clearInterval(ws.syncTimer);
-  ws.syncTimer = setInterval(() => syncNow(ws), 15000);
+  ws.syncTimer = setInterval(() => syncNow(ws), 60000);
 }
 
 async function fetchAllMeta(token, accId, datePreset) {
