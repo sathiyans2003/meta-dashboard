@@ -117,39 +117,11 @@ async function switchAccount(newAccountId) {
   const fullId = "act_" + newAccountId;
   if (!newAccountId || fullId === currentAccountId) return;
   
-  setStatus("wait");
-  // Immediate UI feedback
-  if (document.getElementById("overviewAccName")) {
-    document.getElementById("overviewAccName").textContent = "Switching account...";
-    document.getElementById("overviewAccId").textContent = fullId;
-  }
+  // Save the new account ID to localStorage
+  localStorage.setItem("meta_account_id", fullId);
   
-  try {
-    const res = await fetch(`${API}/connect`, {
-      method: "POST", 
-      headers: { 
-        "Content-Type": "application/json",
-        "x-meta-token": currentToken,
-        "x-meta-account-id": currentAccountId
-      },
-      body: JSON.stringify({ 
-        token: currentToken, 
-        accountId: fullId, 
-        datePreset: document.getElementById("datePresetSel").value 
-      })
-    });
-    const json = await res.json();
-    if (!json.ok) {
-      alert("Failed to switch account: " + json.error);
-      // Revert title if failed
-      updateSidebarAccount(allAccounts.find(a => a.id === currentAccountId));
-    } else {
-      currentAccountId = fullId;
-      updateAccountSwitcher(fullId);
-    }
-  } catch(e) {
-    alert("Error switching account: " + e.message);
-  }
+  // Reload page to re-initialize everything with the new account
+  window.location.reload();
 }
 
 // ══════════════════════════════════════════════════════════════
