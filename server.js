@@ -4,7 +4,7 @@ const cors = require("cors");
 const path = require("path");
 const http = require("http");
 const WebSocket = require("ws");
-const { validateToken, validateAccount, fetchAccountSummary, fetchCampaigns, fetchAdSets, fetchAds } = require("./metaApi");
+const { fetchAccountSummary, fetchCampaigns, fetchAdSets, fetchAds } = require("./metaApi");
 const { syncAll } = require("./sheetsApi");
 
 const app = express();
@@ -37,11 +37,11 @@ app.get("/explorer",   (_, res) => res.sendFile(path.join(__dirname, "explorer.h
 
 // ─── API: Fetch Complete Data ────────────────────────────────────────────────
 app.get("/api/data", async (req, res) => {
-  if (!req.userSession) return res.status(401).json({ error: "No session. Please connect again." });
+  if (!req.userSession) return res.status(401).json({ error: "No session." });
   const { token, accId, datePreset } = req.userSession;
   try {
     const data = await fetchAllMeta(token, accId, datePreset);
-    res.json({ ok: true, status: "ok", lastUpdated: new Date().toISOString(), data });
+    res.json({ ok: true, data });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -51,7 +51,8 @@ app.get("/api/data", async (req, res) => {
 app.get("/auth/facebook", (req, res) => {
   const appId = process.env.META_APP_ID;
   const host = req.get("host");
-  const protocol = "https"; // Force https for redirect
+  // Force HTTPS if not on localhost
+  const protocol = (host.includes("localhost") || host.includes("127.0.0.1")) ? "http" : "https";
   const redirect = encodeURIComponent(`${protocol}://${host}/auth/callback`);
   const scope = "ads_read,ads_management,business_management,pages_read_engagement";
   res.redirect(`https://www.facebook.com/dialog/oauth?client_id=${appId}&redirect_uri=${redirect}&scope=${scope}&response_type=code`);
@@ -62,7 +63,8 @@ app.get("/auth/callback", async (req, res) => {
   const appId = process.env.META_APP_ID;
   const appSecret = process.env.META_APP_SECRET;
   const host = req.get("host");
-  const redirect = `https://${host}/auth/callback`;
+  const protocol = (host.includes("localhost") || host.includes("127.0.0.1")) ? "http" : "https";
+  const redirect = `${protocol}://${host}/auth/callback`;
   const axios = require("axios");
 
   try {
@@ -98,23 +100,6 @@ wss.on("connection", (ws) => {
         ws.token = msg.token;
         ws.accountId = msg.accountId;
         ws.datePreset = "today";
-        console.log("WS Authenticated for:", ws.accountId);
-        
-        // Fetch account list for the switcher
-        const axios = require("axios");
-        try {
-          const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { 
-            params: { fields: "id,name,account_status,currency,timezone_name", access_token: ws.token, limit: 50 } 
-          });
-          const allAccounts = (accRes.data?.data || []).filter(a => a.account_status === 1);
-          const activeAcc = allAccounts.find(a => a.id === ws.accountId) || allAccounts[0];
-
-          ws.send(JSON.stringify({ 
-            type: "connected", 
-            accountInfo: { ...activeAcc, allAccounts }
-          }));
-        } catch (e) { console.error("Acc fetch error:", e.message); }
-
         await syncNow(ws);
         startSyncWorker(ws);
       }
@@ -146,6 +131,11 @@ async function fetchAllMeta(token, accId, datePreset) {
   ]);
   return { summary, campaigns, adsets, ads };
 }
+
+// 404 Catch-all (IMPORTANT)
+app.use((req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
 
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => console.log(`🚀 Multi-user Dashboard on port ${PORT}`));
