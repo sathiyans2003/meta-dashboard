@@ -1,13 +1,6 @@
 const API = (window.location.protocol === "file:" || window.location.hostname === "" || window.location.hostname === "localhost") ? "http://localhost:4000/api" : window.location.origin + "/api";
 let oauthToken = null;
 
-// Connect mode
-function switchMode(mode) {
-  document.getElementById("modeTabFB").classList.toggle("active", mode === "fb");
-  document.getElementById("modeTabToken").classList.toggle("active", mode === "token");
-  document.getElementById("modePanelFB").classList.toggle("active", mode === "fb");
-  document.getElementById("modePanelToken").classList.toggle("active", mode === "token");
-}
 
 // FB Popup Open
 function startFBOAuth() {
@@ -73,53 +66,6 @@ function showOAuthAccPicker(accounts) {
   `).join("");
 }
 
-// Manual Token Scan
-async function scanAndPick() {
-  const token = document.getElementById("tokenInp").value.trim();
-  const errEl = document.getElementById("scanErr");
-  const btn = document.getElementById("scanBtnText");
-  errEl.classList.remove("show");
-
-  if (!token) { errEl.textContent = "Token paste பண்ணுங்கள்!"; errEl.classList.add("show"); return; }
-  btn.textContent = "Scanning...";
-
-  try {
-    const res = await fetch(`${API}/scan-accounts`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token })
-    });
-    const json = await res.json();
-    if (!json.ok) { errEl.textContent = json.error; errEl.classList.add("show"); btn.textContent = "Scan Ad Accounts"; return; }
-
-    oauthToken = token;
-    const accounts = json.accounts;
-    if (!accounts.length) {
-      errEl.textContent = "Active ad accounts இல்லை! Account status-ஐ check பண்ணுங்கள்.";
-      errEl.classList.add("show"); btn.textContent = "Scan Ad Accounts"; return;
-    }
-
-    connectAccount(token, accounts[0].id, "today");
-  } catch (err) {
-    errEl.textContent = "Error: " + err.message;
-    errEl.classList.add("show");
-  }
-  btn.textContent = "Scan Ad Accounts";
-}
-
-function showTokenAccPicker(accounts, token) {
-  const picker = document.getElementById("tokenAccPicker");
-  const list = document.getElementById("tokenAccList");
-  picker.classList.add("show");
-  list.innerHTML = accounts.map(a => `
-    <div class="acc-item" onclick="connectAccount('${token}','${a.id}','today')">
-      <div>
-        <div class="acc-name">${a.name}</div>
-        <div class="acc-id">${a.id} · ${a.currency || ""}</div>
-      </div>
-      <span class="acc-active">Select</span>
-    </div>
-  `).join("");
-}
 
 // Connect Account Logic (Final logic block on Login page)
 async function connectAccount(token, accountId, datePreset) {
@@ -152,54 +98,18 @@ async function connectAccount(token, accountId, datePreset) {
   }
 }
 
-// Redirect on Enter if token mode
-document.addEventListener("keydown", e => {
-  if (e.key === "Enter" && document.getElementById("modePanelToken").classList.contains("active")) {
-    scanAndPick();
-  }
-});
-
-// Auto-navigate to dashboard if ALREADY connected OR if .env has full credentials
+// Auto-navigate to dashboard if ALREADY connected
 window.onload = async () => {
   try {
-    // Step 1: Check if server is already connected (auto-connect from .env)
+    // Check if server is already connected (auto-connect from .env)
     const r = await fetch(`${API}/status`);
     const s = await r.json();
     if (s.connected) {
-      // Already connected — go straight to dashboard
       showAutoConnecting("உங்கள் account already connected! Dashboard →");
       setTimeout(() => { window.location.href = "dashboard.html"; }, 900);
       return;
     }
-
-    // Step 2: Check env config to show/hide correct modes
-    const envRes = await fetch(`${API}/env-config`);
-    const env = await envRes.json();
-
-    // Hide Facebook OAuth tab if App ID not set in .env
-    if (!env.hasAppId) {
-      document.getElementById("modeTabFB").style.display = "none";
-      switchMode("token"); // Default to manual token
-    }
-
-    // If token + account both set but server not yet connected (first load race)
-    if (env.autoConnected) {
-      showAutoConnecting(".env credentials found — connecting...");
-      // Retry after 2s (server might still be initializing)
-      setTimeout(async () => {
-        try {
-          const r2 = await fetch(`${API}/status`);
-          const s2 = await r2.json();
-          if (s2.connected) {
-            showAutoConnecting("✅ Connected! Redirecting to Dashboard...");
-            setTimeout(() => { window.location.href = "dashboard.html"; }, 800);
-          } else {
-            hideAutoConnecting();
-          }
-        } catch (e) { hideAutoConnecting(); }
-      }, 2500);
-    }
-  } catch (e) { }
+  } catch(e) {}
 };
 
 function showAutoConnecting(msg) {
@@ -208,19 +118,4 @@ function showAutoConnecting(msg) {
 }
 function hideAutoConnecting() {
   document.getElementById("fbLoading").classList.remove("show");
-}
-
-// Token field visibility toggle
-function toggleTokenVis() {
-  const inp = document.getElementById("tokenInp");
-  const btn = document.getElementById("tokenVisBtn");
-  if (!inp || !btn) return;
-
-  if (inp.type === "password") {
-    inp.type = "text";
-    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
-  } else {
-    inp.type = "password";
-    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
-  }
 }
