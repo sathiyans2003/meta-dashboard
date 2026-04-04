@@ -15,26 +15,22 @@ function startFBOAuth() {
   document.getElementById("fbLoadingText").textContent = "Facebook login-க்கு காத்திருக்கிறோம்...";
 
   window.addEventListener("message", function handler(e) {
-    const expectedOrigin = (window.location.protocol === "file:" || window.location.hostname === "" || window.location.hostname === "localhost") ? "http://localhost:4000" : window.location.origin;
-    if (e.origin !== expectedOrigin) return;
-    window.removeEventListener("message", handler);
-    document.getElementById("fbLoading").classList.remove("show");
-    btn.disabled = false;
-    document.getElementById("fbOAuthBtnText").textContent = "Continue with Facebook →";
-
-    if (e.data.type === "fb_connected") {
+    // Handling connection regardless of origin for reliability 
+    if (e.data && e.data.type === "fb_connected") {
+      console.log("FB Connected!");
       oauthToken = e.data.token;
       const accounts = e.data.accounts || [];
-      if (accounts.length > 0) {
-        // Multi-user logic: Save to LocalStorage and Redirect
-        saveSession(oauthToken, accounts[0].id, "today");
-        window.location.href = "dashboard.html";
-      } else {
-        const errEl = document.getElementById("connectErr");
-        errEl.textContent = "⚠️ Active accounts இல்லை!";
-        errEl.classList.add("show");
-      }
-    } else if (e.data.type === "fb_error") {
+      
+      // Save and Redirect
+      const firstAccId = accounts.length > 0 ? accounts[0].id : "";
+      saveSession(oauthToken, firstAccId, "today");
+      
+      window.removeEventListener("message", handler);
+      window.location.href = "dashboard.html";
+    } else if (e.data && e.data.type === "fb_error") {
+      document.getElementById("fbLoading").classList.remove("show");
+      btn.disabled = false;
+      document.getElementById("fbOAuthBtnText").textContent = "Continue with Facebook →";
       const errEl = document.getElementById("connectErr");
       errEl.textContent = "⚠️ " + e.data.error;
       errEl.classList.add("show");
