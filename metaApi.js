@@ -39,9 +39,19 @@ function getResultsCount(actions = [], objective) {
   const obj = String(objective || "").toUpperCase();
 
   const map = {
-    'OUTCOME_SALES': ['purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase', 'add_to_cart', 'complete_registration'],
-    'OUTCOME_LEADS': ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 'onsite_conversion.total_lead_value', 'complete_registration', 'offsite_conversion.fb_pixel_complete_registration'],
-    'OUTCOME_ENGAGEMENT': ['onsite_conversion.messaging_conversation_started_7d', 'post_engagement', 'page_engagement', 'onsite_conversion.messaging_conversation_started_1d', 'contact'],
+    'OUTCOME_SALES': [
+      'purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase', 
+      'add_to_cart', 'complete_registration', 'offsite_conversion.fb_pixel_complete_registration', 'submit_application'
+    ],
+    'OUTCOME_LEADS': [
+      'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 
+      'onsite_conversion.total_lead_value', 'complete_registration', 'offsite_conversion.fb_pixel_complete_registration', 
+      'submit_application', 'offsite_conversion.fb_pixel_custom'
+    ],
+    'OUTCOME_ENGAGEMENT': [
+      'onsite_conversion.messaging_conversation_started_7d', 'post_engagement', 'page_engagement', 
+      'onsite_conversion.messaging_conversation_started_1d', 'contact', 'onsite_conversion.messaging_conversation_started_grouped'
+    ],
     'OUTCOME_TRAFFIC': ['landing_page_view', 'link_click'],
     'OUTCOME_AWARENESS': ['reach', 'impressions'],
     'OUTCOME_APP_PROMOTION': ['app_install']
