@@ -19,29 +19,24 @@ let currentSort = {
 // ══════════════════════════════════════════════════════════════
 window.onload = async () => {
   loadColPrefs();
-  try {
-    const r = await fetch(`${API}/status`);
-    const s = await r.json();
-    if (!s.connected) {
-      window.location.href = "index.html"; // Not connected, go to login
-    } else {
-      currentToken = s.config.token;
-      currentAccountId = s.config.accountId;
-      allAccounts = s.allAccounts || [];
-      
-      // Update UI with existing status
-      updateSidebarAccount(s.account);
-      updateAccountSwitcher(s.config.accountId);
-      if (s.config.datePreset) {
-        document.getElementById("datePresetSel").value = s.config.datePreset;
-      }
-      
-      // Start WebSocket
-      connect();
-    }
-  } catch(e) {
-    console.error("Status check failed:", e);
+  
+  // Multi-user: Check localStorage first
+  currentToken = localStorage.getItem("meta_token");
+  currentAccountId = localStorage.getItem("meta_account_id");
+  const datePreset = localStorage.getItem("meta_date_preset") || "today";
+
+  if (!currentToken || !currentAccountId) {
+    window.location.href = "index.html"; 
+    return;
   }
+
+  // Set initial UI state
+  if (document.getElementById("datePresetSel")) {
+    document.getElementById("datePresetSel").value = datePreset;
+  }
+
+  // Start WebSocket and load data
+  connect();
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -132,7 +127,11 @@ async function switchAccount(newAccountId) {
   try {
     const res = await fetch(`${API}/connect`, {
       method: "POST", 
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "x-meta-token": currentToken,
+        "x-meta-account-id": currentAccountId
+      },
       body: JSON.stringify({ 
         token: currentToken, 
         accountId: fullId, 
@@ -212,7 +211,11 @@ async function changeDatePreset(v) {
   try { 
     await fetch(`${API}/daterange`, { 
       method: "POST", 
-      headers: { "Content-Type": "application/json" }, 
+      headers: { 
+        "Content-Type": "application/json",
+        "x-meta-token": currentToken,
+        "x-meta-account-id": currentAccountId
+      }, 
       body: JSON.stringify({ datePreset: v }) 
     }); 
   } catch(e) {
@@ -228,7 +231,15 @@ function connect() {
   clearTimeout(reconn);
   try { ws = new WebSocket(WS); } catch(_) { scheduleReconn(); return; }
 
-  ws.onopen  = () => setStatus("ok");
+  ws.onopen  = () => {
+    setStatus("ok");
+    // Send auth immediately
+    ws.send(JSON.stringify({ 
+      type: "auth", 
+      token: currentToken, 
+      accountId: currentAccountId 
+    }));
+  };
   ws.onclose = () => { setStatus("err"); scheduleReconn(); };
   ws.onerror = () => { setStatus("err"); };
 
@@ -270,15 +281,20 @@ function connect() {
     } catch(_) {}
   };
 
-  setInterval(() => { if (ws.readyState === 1) ws.send(JSON.stringify({ type:"ping" })); }, 15000);
+  setInterval(() => { if (ws.readyState === 1) ws.send(JSON.stringify({ type:"ping" })); }, 10000);
 }
 
 function scheduleReconn() { reconn = setTimeout(connect, 5000); }
 
 async function disconnectFacebook() {
-  if (!confirm("Disconnect pandhal ellaa data clear aagum. Continue?")) return;
   try {
-    const res = await fetch(`${API}/disconnect`, { method:"POST" });
+    const res = await fetch(`${API}/disconnect`, { 
+      method:"POST",
+      headers: {
+        "x-meta-token": currentToken,
+        "x-meta-account-id": currentAccountId
+      }
+    });
     const json = await res.json();
     if (json.ok) window.location.href = "index.html";
     else alert("Disconnect failed: " + (json.error || "Unknown error"));
