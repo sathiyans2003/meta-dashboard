@@ -8,6 +8,26 @@
   ],
   "routes": [
     {
+      "src": "/style\\.css",
+      "dest": "/style.css"
+    },
+    {
+      "src": "/logo\\.png",
+      "dest": "/logo.png"
+    },
+    {
+      "src": "/app\\.js",
+      "dest": "/app.js"
+    },
+    {
+      "src": "/login\\.js",
+      "dest": "/login.js"
+    },
+    {
+      "src": "/explorer\\.js",
+      "dest": "/explorer.js"
+    },
+    {
       "src": "/(.*)",
       "dest": "server.js"
     }

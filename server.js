@@ -1,7 +1,6 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const http = require("http");
 const path = require("path");
 const { validateToken, validateAccount, fetchAccountSummary, fetchCampaigns, fetchAdSets, fetchAds } = require("./metaApi");
 const { syncAll } = require("./sheetsApi");
@@ -9,421 +8,127 @@ const { syncAll } = require("./sheetsApi");
 const app = express();
 app.set("trust proxy", 1);
 
-// ─── Vercel Serverless Detection ─────────────────────────────────────────────
-const IS_VERCEL = !!(process.env.VERCEL || process.env.VERCEL_ENV);
-
-// ─── WebSocket Setup (Only for local / non-serverless) ───────────────────────
-let wss    = null;
-let server = null;
-
-if (!IS_VERCEL) {
-  const { WebSocketServer } = require("ws");
-  server = http.createServer(app);
-  try {
-    wss = new WebSocketServer({ server });
-    console.log("✅ WebSocket enabled");
-  } catch (e) {
-    console.log("⚠️  WebSocket not available:", e.message);
-  }
-}
-
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// ─── State ────────────────────────────────────────────────────────────────────
-let CONFIG = {
-  token: null,
-  accountId: null,
-  datePreset: process.env.DATE_PRESET || "today",
-};
-let latestData  = null;
-let lastUpdated = null;
-let status      = "idle";
-let runCount    = 0;
-let loopTimer   = null;
-let accountInfo = null;
-let nextSync    = Date.now() + INTERVAL_PLACEHOLDER;
+// ─── Middleware: Extract User Session from Headers ──────────────────────────
+// Multi-user Support: Each request must carry its own token and account ID
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    const token = req.headers["x-meta-token"];
+    const accId = req.headers["x-meta-account-id"];
+    const datePreset = req.headers["x-meta-date-preset"] || "today";
 
-const INTERVAL = parseInt(process.env.UPDATE_INTERVAL_SECONDS || "300") * 1000;
-nextSync = Date.now() + INTERVAL;
+    if (token && accId) {
+      req.userSession = { token, accId, datePreset };
+    }
+  }
+  next();
+});
 
 // ─── Page Routes ─────────────────────────────────────────────────────────────
-app.get("/", (_, res) => {
-  if (CONFIG.token) return res.redirect("/dashboard.html");
-  res.sendFile(path.join(__dirname, "index.html"));
-});
-app.get("/dashboard", (_, res) => {
-  if (!CONFIG.token) return res.redirect("/");
-  res.sendFile(path.join(__dirname, "dashboard.html"));
-});
-app.get("/explorer", (_, res) => res.sendFile(path.join(__dirname, "explorer.html")));
+app.get("/",           (_, res) => res.sendFile(path.join(__dirname, "index.html")));
+app.get("/dashboard",  (_, res) => res.sendFile(path.join(__dirname, "dashboard.html")));
+app.get("/explorer",   (_, res) => res.sendFile(path.join(__dirname, "explorer.html")));
 
-const PORT = process.env.PORT || 4000;
-
-// ─── Broadcast (WebSocket — local only) ──────────────────────────────────────
-function broadcast(payload) {
-  if (!wss) return;
-  const msg = JSON.stringify(payload);
-  wss.clients.forEach((c) => { if (c.readyState === 1) c.send(msg); });
-}
-
-// ─── Main Fetch Cycle ─────────────────────────────────────────────────────────
-async function runCycle() {
-  if (!CONFIG.token || !CONFIG.accountId) return;
-  runCount++;
-  status = "fetching";
-  broadcast({ type: "status", status: "fetching", runCount });
+// ─── API: Fetch Complete Data (On-Demand for Multi-user) ──────────────────────
+app.get("/api/data", async (req, res) => {
+  if (!req.userSession) return res.status(401).json({ error: "No session. Please connect again." });
+  const { token, accId, datePreset } = req.userSession;
 
   try {
     const [summary, campaigns, adsets, ads] = await Promise.all([
-      fetchAccountSummary(CONFIG.accountId, CONFIG.token, CONFIG.datePreset),
-      fetchCampaigns(CONFIG.accountId, CONFIG.token, CONFIG.datePreset),
-      fetchAdSets(CONFIG.accountId, CONFIG.token, CONFIG.datePreset),
-      fetchAds(CONFIG.accountId, CONFIG.token, CONFIG.datePreset),
+      fetchAccountSummary(accId, token, datePreset),
+      fetchCampaigns(accId, token, datePreset),
+      fetchAdSets(accId, token, datePreset),
+      fetchAds(accId, token, datePreset),
     ]);
 
-    latestData = { summary, campaigns, adsets, ads };
-
+    const latestData = { summary, campaigns, adsets, ads };
+    
+    // Process summary logic (same as before)
     if (campaigns && campaigns.length > 0) {
-      let s = {
-        results: 0, purchases: 0, leads: 0, messagingConversations: 0, purchaseValue: 0,
-        spend: 0, impressions: 0, clicks: 0, reach: 0, linkClicks: 0,
-        landingPageViews: 0, uniqueClicks: 0, videoViews: 0, postEngagement: 0, v100: 0,
-        dateStart: "", dateStop: ""
-      };
+      let s = { spend: 0, results: 0, purchases: 0, leads: 0, messagingConversations: 0, purchaseValue: 0, impressions: 0, clicks: 0, reach: 0, linkClicks: 0, landingPageViews: 0, uniqueClicks: 0, videoViews: 0, postEngagement: 0, v100: 0 };
       campaigns.forEach(c => {
-        s.results     += parseFloat(c.results || 0);
-        s.purchases   += parseFloat(c.purchases || 0);
-        s.leads       += parseFloat(c.leads || 0);
-        s.messagingConversations += parseFloat(c.messagingConversations || 0);
-        s.purchaseValue += parseFloat(c.purchaseValue || 0);
-        s.spend       += parseFloat(c.spend || 0);
-        s.impressions += parseFloat(c.impressions || 0);
-        s.clicks      += parseFloat(c.clicks || 0);
-        s.reach       += parseFloat(c.reach || 0);
-        s.linkClicks  += parseFloat(c.linkClicks || 0);
-        s.landingPageViews += parseFloat(c.landingPageViews || 0);
-        s.uniqueClicks += parseFloat(c.uniqueClicks || 0);
-        s.videoViews  += parseFloat(c.videoViews || 0);
-        s.postEngagement += parseFloat(c.postEngagement || 0);
-        s.v100        += parseFloat(c.v100 || 0);
-        if (!s.dateStart || (c.dateStart && c.dateStart < s.dateStart)) s.dateStart = c.dateStart;
-        if (!s.dateStop  || (c.dateStop  && c.dateStop  > s.dateStop))  s.dateStop  = c.dateStop;
+        s.spend += parseFloat(c.spend || 0); s.results += parseFloat(c.results || 0); s.purchases += parseFloat(c.purchases || 0); s.leads += parseFloat(c.leads || 0); s.messagingConversations += parseFloat(c.messagingConversations || 0); s.purchaseValue += parseFloat(c.purchaseValue || 0); s.impressions += parseFloat(c.impressions || 0); s.clicks += parseFloat(c.clicks || 0); s.reach += parseFloat(c.reach || 0); s.linkClicks += parseFloat(c.linkClicks || 0); s.landingPageViews += parseFloat(c.landingPageViews || 0); s.uniqueClicks += parseFloat(c.uniqueClicks || 0); s.videoViews += parseFloat(c.videoViews || 0); s.postEngagement += parseFloat(c.postEngagement || 0); s.v100 += parseFloat(c.v100 || 0);
       });
-      summary.spend      = s.spend.toFixed(2);
-      summary.results    = String(s.results);
-      summary.purchases  = String(s.purchases);
-      summary.leads      = String(s.leads);
-      summary.messagingConversations = String(s.messagingConversations);
-      summary.purchaseValue = s.purchaseValue.toFixed(2);
-      summary.impressions = String(s.impressions);
-      summary.clicks     = String(s.clicks);
-      summary.reach      = String(s.reach);
-      summary.linkClicks = String(s.linkClicks);
-      summary.landingPageViews = String(s.landingPageViews);
-      summary.uniqueClicks = String(s.uniqueClicks);
-      summary.videoViews = String(s.videoViews);
-      summary.postEngagement = String(s.postEngagement);
-      summary.v100       = String(s.v100);
-      summary.dateStart  = s.dateStart;
-      summary.dateStop   = s.dateStop;
-      summary.ctr        = s.impressions > 0 ? ((s.clicks / s.impressions) * 100).toFixed(2) : "0.00";
-      summary.cpc        = s.clicks > 0 ? (s.spend / s.clicks).toFixed(2) : "0.00";
-      summary.cpm        = s.impressions > 0 ? (s.spend / (s.impressions / 1000)).toFixed(2) : "0.00";
-      summary.costPerResult = s.results > 0 ? (s.spend / s.results).toFixed(2) : "0.00";
-      summary.costPerPurchase = s.purchases > 0 ? (s.spend / s.purchases).toFixed(2) : "0.00";
-      summary.purchaseRoas = s.spend > 0 ? (s.purchaseValue / s.spend).toFixed(2) : "0.00";
-      summary.frequency  = s.reach > 0 ? (s.impressions / s.reach).toFixed(2) : "1.00";
-      summary.uniqueCtr  = s.reach > 0 ? ((s.uniqueClicks / s.reach) * 100).toFixed(2) : "0.00";
-      summary.resultRate = s.impressions > 0 ? ((s.results / s.impressions) * 100).toFixed(2) : "0.00";
+      Object.assign(summary, {
+        spend: s.spend.toFixed(2), results: String(s.results), purchases: String(s.purchases), leads: String(s.leads), messagingConversations: String(s.messagingConversations), purchaseValue: s.purchaseValue.toFixed(2), impressions: String(s.impressions), clicks: String(s.clicks), reach: String(s.reach), linkClicks: String(s.linkClicks), landingPageViews: String(s.landingPageViews), uniqueClicks: String(s.uniqueClicks), videoViews: String(s.videoViews), postEngagement: String(s.postEngagement), v100: String(s.v100),
+        ctr: s.impressions > 0 ? ((s.clicks / s.impressions) * 100).toFixed(2) : "0.00",
+        cpc: s.clicks > 0 ? (s.spend / s.clicks).toFixed(2) : "0.00",
+        cpm: s.impressions > 0 ? (s.spend / (s.impressions / 1000)).toFixed(2) : "0.00",
+        costPerResult: s.results > 0 ? (s.spend / s.results).toFixed(2) : "0.00",
+        purchaseRoas: s.spend > 0 ? (s.purchaseValue / s.spend).toFixed(2) : "0.00"
+      });
     }
 
-    lastUpdated = new Date().toISOString();
-    status      = "ok";
-
-    if (process.env.GOOGLE_SHEET_ID && process.env.GOOGLE_SHEET_ID !== "your_google_sheet_id_here") {
-      syncAll(process.env.GOOGLE_SHEET_ID, latestData).catch(e => console.error("Sheet sync error:", e.message));
+    // Google Sheet Sync (Conditional)
+    const sheetId = req.headers["x-google-sheets-id"] || process.env.GOOGLE_SHEET_ID;
+    if (sheetId && sheetId !== "your_google_sheet_id_here") {
+      syncAll(sheetId, latestData).catch(e => console.error("Sheet sync error:", e.message));
     }
 
-    broadcast({ type: "data", status: "ok", lastUpdated, runCount, accountInfo, data: latestData });
-    console.log(`[#${runCount}] ✅  ${campaigns.length} campaigns | ${adsets.length} adsets | ${ads.length} ads | ₹${summary.spend}`);
-    nextSync = Date.now() + INTERVAL;
+    res.json({ ok: true, status: "ok", lastUpdated: new Date().toISOString(), data: latestData });
   } catch (err) {
-    status = "error";
     const errMsg = err.response?.data?.error?.message || err.message;
-    console.error(`[#${runCount}] ❌  ${errMsg}`);
-    broadcast({ type: "status", status: "error", error: errMsg, runCount });
+    res.status(400).json({ error: errMsg });
   }
-}
+});
 
-function startLoop() {
-  clearInterval(loopTimer);
-  runCycle();
-  if (!IS_VERCEL) {
-    loopTimer = setInterval(runCycle, INTERVAL);
-  }
-}
-
-// ─── Facebook OAuth — START ───────────────────────────────────────────────────
+// ─── OAuth Routes (Modified for Multi-user flow) ──────────────────────────────
 app.get("/auth/facebook", (req, res) => {
   const appId = process.env.META_APP_ID;
-  if (!appId || appId === "your_meta_app_id_here") {
-    return res.status(400).send(`
-      <html><body style="font-family:sans-serif;padding:40px;text-align:center;background:#0c1220;color:#e4eaf5;">
-        <h2 style="color:#ef4444;">❌ META_APP_ID Not Configured</h2>
-        <p style="color:#94a3b8;">Environment Variables-ல் <b>META_APP_ID</b> மற்றும் <b>META_APP_SECRET</b> add பண்ணுங்க.</p>
-        <a href="/" style="color:#1877F2;text-decoration:none;">← Go Back</a>
-      </body></html>
-    `);
-  }
-  const host     = req.get("host");
+  if (!appId || appId === "your_meta_app_id_here") return res.status(400).send("App ID Missing");
+  const host = req.get("host");
   const protocol = req.headers["x-forwarded-proto"] || req.protocol;
   const redirect = encodeURIComponent(`${protocol}://${host}/auth/callback`);
-  const scope    = "ads_read,ads_management,business_management,pages_read_engagement";
+  const scope = "ads_read,ads_management,business_management,pages_read_engagement";
   res.redirect(`https://www.facebook.com/dialog/oauth?client_id=${appId}&redirect_uri=${redirect}&scope=${scope}&response_type=code`);
 });
 
-// ─── Facebook OAuth — CALLBACK ────────────────────────────────────────────────
 app.get("/auth/callback", async (req, res) => {
-  const { code, error: fbError } = req.query;
-
-  if (fbError) {
-    return res.send(`<script>window.opener && window.opener.postMessage({type:'fb_error',error:'User cancelled login'},'*'); window.close();</script>`);
-  }
-  if (!code) {
-    return res.status(400).send("No authorization code received from Facebook.");
-  }
-
+  const { code } = req.query;
   try {
-    const appId     = process.env.META_APP_ID;
-    const appSecret = process.env.META_APP_SECRET;
-    const host      = req.get("host");
-    const protocol  = req.headers["x-forwarded-proto"] || req.protocol;
-    const redirect  = encodeURIComponent(`${protocol}://${host}/auth/callback`);
-    const axios     = require("axios");
+    const appId = process.env.META_APP_ID; const appSecret = process.env.META_APP_SECRET;
+    const host = req.get("host"); const protocol = req.headers["x-forwarded-proto"] || req.protocol;
+    const redirect = encodeURIComponent(`${protocol}://${host}/auth/callback`);
+    const axios = require("axios");
 
-    // Short-lived token
-    const tokenRes = await axios.get(
-      `https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&redirect_uri=${redirect}&client_secret=${appSecret}&code=${code}`
-    );
-    const shortToken = tokenRes.data.access_token;
-
-    // Long-lived token
-    const longRes = await axios.get(
-      `https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${shortToken}`
-    );
+    const tokenRes = await axios.get(`https://graph.facebook.com/v19.0/oauth/access_token?client_id=${appId}&redirect_uri=${redirect}&client_secret=${appSecret}&code=${code}`);
+    const longRes = await axios.get(`https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${tokenRes.data.access_token}`);
     const token = longRes.data.access_token;
 
-    const tokenCheck = await validateToken(token);
-    if (!tokenCheck.ok) return res.status(401).send("Token validation failed: " + tokenCheck.error);
-
-    const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, {
-      params: { fields: "id,name,account_status,currency,timezone_name", access_token: token, limit: 50 }
-    });
+    const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { params: { fields: "id,name,account_status,currency,timezone_name", access_token: token, limit: 50 } });
     const accounts = (accRes.data?.data || []).filter(a => a.account_status === 1);
 
-    if (!accounts.length) {
-      return res.send(`<script>window.opener && window.opener.postMessage({type:'fb_error',error:'No active ad accounts found'},'*'); window.close();</script>`);
-    }
-
-    const firstAcc     = accounts[0];
-    const accountId    = firstAcc.id.replace("act_", "");
-    const accountCheck = await validateAccount(`act_${accountId}`, token);
-
-    CONFIG      = { token, accountId: `act_${accountId}`, datePreset: process.env.DATE_PRESET || "today" };
-    accountInfo = { ...accountCheck, allAccounts: accounts };
-    nextSync    = Date.now() + INTERVAL;
-
-    broadcast({ type: "connected", accountInfo, config: { datePreset: CONFIG.datePreset } });
-    startLoop();
-
     res.send(`
-      <html><head><title>Connected!</title></head>
-      <body style="background:#0c1220;color:#e4eaf5;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;">
-        <div>
-          <div style="font-size:48px;margin-bottom:16px;">✅</div>
-          <div style="font-size:18px;font-weight:700;margin-bottom:8px;">Connected!</div>
-          <div style="font-size:13px;color:#546882;margin-bottom:20px;">${accounts.length} active account(s) found</div>
-          <div style="font-size:12px;color:#22c55e;">${firstAcc.name}</div>
-        </div>
-        <script>
-          if (window.opener) {
-            window.opener.postMessage({
-              type: 'fb_connected',
-              token: '${token}',
-              accounts: ${JSON.stringify(accounts)},
-              activeAccount: ${JSON.stringify(firstAcc)}
-            }, '*');
-          }
-          setTimeout(() => window.close(), 2000);
-        </script>
-      </body></html>
+      <html><body><script>
+        if (window.opener) {
+          window.opener.postMessage({ type: 'fb_connected', token: '${token}', accounts: ${JSON.stringify(accounts)} }, '*');
+        }
+        window.close();
+      </script></body></html>
     `);
-  } catch (err) {
-    console.error("OAuth callback error:", err.response?.data || err.message);
-    const errMsg = (err.response?.data?.error?.message || err.message).replace(/'/g, "\\'");
-    res.send(`<script>window.opener && window.opener.postMessage({type:'fb_error',error:'${errMsg}'},'*'); window.close();</script>`);
-  }
+  } catch (err) { res.send(`OAuth Error: ${err.message}`); }
 });
 
-// ─── API Endpoints ────────────────────────────────────────────────────────────
+// ─── API: Validation & Other Endpoints ────────────────────────────────────────
 app.post("/api/scan-accounts", async (req, res) => {
   const { token } = req.body;
-  if (!token) return res.status(400).json({ ok: false, error: "Token required" });
   try {
     const axios = require("axios");
-    const r = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, {
-      params: { fields: "id,name,account_status,currency,timezone_name,business", access_token: token, limit: 50 }
-    });
-    const all    = r.data?.data || [];
-    const active = all.filter(a => a.account_status === 1);
-    res.json({ ok: true, accounts: active, total: all.length });
-  } catch (err) {
-    res.status(400).json({ ok: false, error: err.response?.data?.error?.message || err.message });
-  }
+    const r = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { params: { fields: "id,name,account_status,currency,timezone_name", access_token: token, limit: 50 } });
+    res.json({ ok: true, accounts: (r.data?.data || []).filter(a => a.account_status === 1) });
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-app.get("/api/status", (req, res) => {
-  res.json({ connected: !!CONFIG.token, account: accountInfo || null, allAccounts: accountInfo?.allAccounts || [], config: CONFIG });
+app.get("/api/env-config", (_, res) => {
+  res.json({ hasAppId: !!process.env.META_APP_ID });
 });
-
-app.post("/api/connect", async (req, res) => {
-  const { token, accountId, datePreset } = req.body;
-  if (!token || !accountId) return res.status(400).json({ ok: false, error: "token and accountId required" });
-
-  const tokenCheck = await validateToken(token);
-  if (!tokenCheck.ok) return res.status(401).json({ ok: false, error: "Invalid token: " + tokenCheck.error });
-
-  let accountCheck = null;
-  const cachedAcc  = (accountInfo?.allAccounts || []).find(a => "act_" + a.id === accountId || a.id === accountId);
-  if (cachedAcc) {
-    accountCheck = { ok: true, name: cachedAcc.name, id: cachedAcc.id, currency: cachedAcc.currency, timezone: cachedAcc.timezone_name };
-  } else {
-    accountCheck = await validateAccount(accountId, token);
-    if (!accountCheck.ok) return res.status(400).json({ ok: false, error: "Account error: " + accountCheck.error });
-  }
-
-  let allAccounts = accountInfo?.allAccounts || [];
-  if (allAccounts.length === 0) {
-    try {
-      const axios = require("axios");
-      const r = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, {
-        params: { fields: "id,name,account_status,currency,timezone_name,business", access_token: token, limit: 50 }
-      });
-      allAccounts = (r.data?.data || []).filter(a => a.account_status === 1);
-    } catch (e) {}
-  }
-
-  CONFIG      = { token, accountId, datePreset: datePreset || "today" };
-  accountInfo = { ...accountCheck, allAccounts };
-  nextSync    = Date.now() + INTERVAL;
-  broadcast({ type: "connected", accountInfo, config: { datePreset: CONFIG.datePreset } });
-  startLoop();
-  res.json({ ok: true, message: "Connected!", user: tokenCheck, account: accountCheck });
-});
-
-app.post("/api/disconnect", (req, res) => {
-  clearInterval(loopTimer);
-  loopTimer   = null;
-  CONFIG      = { token: null, accountId: null, datePreset: "today" };
-  latestData  = null;
-  lastUpdated = null;
-  status      = "idle";
-  runCount    = 0;
-  accountInfo = null;
-  broadcast({ type: "disconnected" });
-  res.json({ ok: true });
-});
-
-app.post("/api/daterange", (req, res) => {
-  CONFIG.datePreset = req.body.datePreset || "today";
-  broadcast({ type: "dateChanged", datePreset: CONFIG.datePreset });
-  runCycle();
-  res.json({ ok: true, datePreset: CONFIG.datePreset });
-});
-
-app.get("/api/health",    (_, res) => res.json({ ok: true, status, lastUpdated, runCount, accountInfo }));
-app.get("/api/config",    (_, res) => res.json({ datePreset: CONFIG.datePreset, hasToken: !!CONFIG.token, hasAccount: !!CONFIG.accountId, accountInfo }));
-app.get("/api/data",      (_, res) => latestData ? res.json({ status, lastUpdated, runCount, data: latestData }) : res.status(503).json({ error: "No data yet" }));
-app.get("/api/summary",   (_, res) => latestData ? res.json(latestData.summary)   : res.status(503).json({ error: "No data yet" }));
-app.get("/api/campaigns", (_, res) => latestData ? res.json(latestData.campaigns) : res.status(503).json({ error: "No data yet" }));
-app.get("/api/adsets",    (_, res) => latestData ? res.json(latestData.adsets)    : res.status(503).json({ error: "No data yet" }));
-app.get("/api/ads",       (_, res) => latestData ? res.json(latestData.ads)       : res.status(503).json({ error: "No data yet" }));
-app.get("/api/env-config",(_, res) => {
-  const appId = process.env.META_APP_ID;
-  res.json({
-    hasAppId: !!(appId && appId !== "your_meta_app_id_here"),
-    hasToken: !!(process.env.META_ACCESS_TOKEN && process.env.META_ACCESS_TOKEN !== "your_meta_access_token_here"),
-    hasAccId: !!(process.env.META_AD_ACCOUNT_ID && process.env.META_AD_ACCOUNT_ID !== "your_ad_account_id_here"),
-  });
-});
-app.post("/api/refresh", async (_, res) => { startLoop(); res.json({ ok: true }); });
-
-// ─── WebSocket Events ────────────────────────────────────────────────────────
-if (wss) {
-  wss.on("connection", (ws) => {
-    if (latestData) {
-      ws.send(JSON.stringify({ type: "data", status, lastUpdated, runCount, accountInfo, data: latestData }));
-    } else {
-      ws.send(JSON.stringify({ type: "status", status: CONFIG.token ? "fetching" : "waiting_for_token" }));
-    }
-    ws.on("message", (msg) => {
-      try { const p = JSON.parse(msg); if (p.type === "ping") ws.send(JSON.stringify({ type: "pong" })); } catch (_) {}
-    });
-  });
-  setInterval(() => {
-    if (!CONFIG.token) return;
-    broadcast({ type: "countdown", remaining: Math.max(0, Math.ceil((nextSync - Date.now()) / 1000)) });
-  }, 1000);
-}
-
-// ─── Auto-connect ─────────────────────────────────────────────────────────────
-async function tryAutoConnect() {
-  const token = process.env.META_ACCESS_TOKEN;
-  const accId = process.env.META_AD_ACCOUNT_ID;
-  if (!token || token === "your_meta_access_token_here") return;
-  if (!accId  || accId  === "your_ad_account_id_here")  return;
-
-  try {
-    const tokenCheck = await validateToken(token);
-    if (!tokenCheck.ok) { console.error("❌ Auto-connect: bad token"); return; }
-    const accountId    = String(accId).replace(/[^0-9]/g, "");
-    const accountCheck = await validateAccount(`act_${accountId}`, token);
-    if (!accountCheck.ok) { console.error("❌ Auto-connect: bad account"); return; }
-
-    let allAccounts = [];
-    try {
-      const axios = require("axios");
-      const r = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, {
-        params: { fields: "id,name,account_status,currency,timezone_name", access_token: token, limit: 50 }
-      });
-      allAccounts = (r.data?.data || []).filter(a => a.account_status === 1);
-    } catch (e) {}
-
-    CONFIG      = { token, accountId: `act_${accountId}`, datePreset: process.env.DATE_PRESET || "today" };
-    accountInfo = { ...accountCheck, allAccounts };
-    nextSync    = Date.now() + INTERVAL;
-    startLoop();
-    console.log(`✅ Auto-connected → ${accountCheck.name}`);
-  } catch (err) {
-    console.error("❌ Auto-connect error:", err.message);
-  }
-}
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-if (!IS_VERCEL && server) {
-  server.listen(PORT, () => {
-    console.log(`\n╔══════════════════════════════════════════╗`);
-    console.log(`║  META ADS LIVE REPORTER — BACKEND API   ║`);
-    console.log(`╚══════════════════════════════════════════╝`);
-    console.log(`  Dashboard → http://localhost:${PORT}`);
-    console.log(`  API       → http://localhost:${PORT}/api`);
-    console.log(`  Refresh   → every ${INTERVAL / 1000}s\n`);
-    tryAutoConnect();
-  });
-} else if (IS_VERCEL) {
-  tryAutoConnect().catch(console.error);
-}
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, () => console.log(`🚀 Multi-user Dashboard running on port ${PORT}`));
 
 module.exports = app;
