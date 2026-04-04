@@ -31,6 +31,16 @@ window.onload = () => {
   if (document.getElementById("datePresetSel")) {
     document.getElementById("datePresetSel").value = datePreset;
   }
+
+  // INSTANT LOAD: Load last known account info from storage
+  const cachedAcc = localStorage.getItem("meta_last_account_info");
+  if (cachedAcc) {
+    try {
+      const acc = JSON.parse(cachedAcc);
+      updateSidebarAccount(acc);
+    } catch(e) {}
+  }
+
   connect();
 };
 
@@ -214,6 +224,12 @@ function connect() {
           allAccounts = msg.accountInfo.allAccounts;
           console.log("Got", allAccounts.length, "accounts");
           updateAccountSwitcher(currentAccountId);
+          
+          // Save for instant load next time
+          const activeAcc = allAccounts.find(a => a.id === currentAccountId) || allAccounts[0];
+          if (activeAcc) {
+            localStorage.setItem("meta_last_account_info", JSON.stringify(activeAcc));
+          }
         }
         updateSidebarAccount(msg.accountInfo);
       }
