@@ -181,10 +181,14 @@ const ITEM_FIELDS = [
 
 
 function getSum(actions = [], types = []) {
+  if (!Array.isArray(actions)) return "0";
   let sum = 0;
-  types.forEach(t => {
-    const f = actions.find(a => a.action_type === t);
-    if (f) sum += parseFloat(f.value || 0);
+  // Use a set of types for faster lookup and better structure
+  const targetTypes = new Set(types);
+  actions.forEach(a => {
+    if (targetTypes.has(a.action_type)) {
+      sum += parseFloat(a.value || 0);
+    }
   });
   return sum.toFixed(2);
 }
@@ -207,7 +211,8 @@ function parseMetrics(d) {
 
   const leadCount = parseFloat(getSum(ac, [
     'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 
-    'onsite_conversion.total_lead_value', 'complete_registration', 'offsite_conversion.fb_pixel_complete_registration'
+    'onsite_conversion.total_lead_value', 'complete_registration', 'offsite_conversion.fb_pixel_complete_registration',
+    'contact', 'offsite_conversion.fb_pixel_contact', 'submit_form', 'submit_application'
   ]));
   const cpLead = leadCount > 0 ? (spend / leadCount) : 0;
 
