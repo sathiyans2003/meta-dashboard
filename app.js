@@ -162,37 +162,24 @@ async function applyCustomDate() {
   const until = document.getElementById("endDate").value;
   if (!since || !until) return alert("Select both dates");
   
+  const range = { since, until };
+  localStorage.setItem("meta_date_preset", JSON.stringify(range));
+  
   setStatus("wait");
-  try {
-    await fetch(`${API}/daterange`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ datePreset: { since, until } })
-    });
-  } catch (err) {
-    alert("Date range update failed: " + err.message);
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: "update_date", datePreset: range }));
   }
 }
 
 async function changeDatePreset(v) {
   setStatus("wait");
-  // Show spinner on the refresh button too
+  localStorage.setItem("meta_date_preset", v);
+  
   const btn = document.getElementById("refreshBtn");
   if (btn) btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="animation:spin 0.8s linear infinite"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Updating...`;
   
-  try { 
-    await fetch(`${API}/daterange`, { 
-      method: "POST", 
-      headers: { 
-        "Content-Type": "application/json",
-        "x-meta-token": currentToken,
-        "x-meta-account-id": currentAccountId
-      }, 
-      body: JSON.stringify({ datePreset: v }) 
-    }); 
-  } catch(e) {
-    console.error("Date change failed:", e);
-    setStatus("err");
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: "update_date", datePreset: v }));
   }
 }
 
@@ -209,7 +196,8 @@ function connect() {
     ws.send(JSON.stringify({ 
       type: "auth", 
       token: currentToken, 
-      accountId: currentAccountId 
+      accountId: currentAccountId,
+      datePreset: localStorage.getItem("meta_date_preset") || "today"
     }));
   };
   ws.onclose = () => { setStatus("err"); scheduleReconn(); };
