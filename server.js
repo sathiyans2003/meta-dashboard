@@ -98,6 +98,23 @@ wss.on("connection", (ws) => {
         ws.token = msg.token;
         ws.accountId = msg.accountId;
         ws.datePreset = "today";
+        console.log("WS Authenticated for:", ws.accountId);
+        
+        // Fetch account list for the switcher
+        const axios = require("axios");
+        try {
+          const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { 
+            params: { fields: "id,name,account_status,currency,timezone_name", access_token: ws.token, limit: 50 } 
+          });
+          const allAccounts = (accRes.data?.data || []).filter(a => a.account_status === 1);
+          const activeAcc = allAccounts.find(a => a.id === ws.accountId) || allAccounts[0];
+
+          ws.send(JSON.stringify({ 
+            type: "connected", 
+            accountInfo: { ...activeAcc, allAccounts }
+          }));
+        } catch (e) { console.error("Acc fetch error:", e.message); }
+
         await syncNow(ws);
         startSyncWorker(ws);
       }
