@@ -161,8 +161,7 @@ app.get("/auth/facebook", (req, res) => {
     return res.status(400).send(`
       <div style="font-family:sans-serif; padding:40px; text-align:center;">
         <h2 style="color:#d32f2f;">❌ Configuration Required</h2>
-        <p>You haven't set your <b>META_APP_ID</b> in the <code>.env</code> file.</p>
-        <p>Please edit the <code>.env</code> file and restart the server.</p>
+        <p>Please set <b>META_APP_ID</b> in your environment variables.</p>
         <a href="/" style="color:#1877F2;">← Go Back</a>
       </div>
     `);
