@@ -42,15 +42,14 @@ function updateAccountSwitcher(activeId) {
   const list = document.getElementById("accountSwitcherList");
   if (!lbl || !list) return;
 
-  if (!allAccounts || !allAccounts.length) {
-    lbl.textContent = "No accounts";
-    list.innerHTML = `<div style="padding:10px 12px;color:var(--muted);font-size:12px;">No accounts found</div>`;
+  if (!allAccounts || allAccounts.length === 0) {
+    lbl.textContent = "Fetching Accounts...";
     return;
   }
   
   const activeAcc = allAccounts.find(a => a.id === activeId) || allAccounts[0];
   lbl.textContent = activeAcc ? activeAcc.name : "Select Account";
-
+  
   renderAccList(allAccounts, activeId);
 }
 
@@ -208,10 +207,12 @@ function connect() {
       }
 
       if (msg.type === "connected") {
+        console.log("WS Connected, Account Info Received");
         if (msg.config?.token) currentToken = msg.config.token;
         if (msg.accountInfo?.id) currentAccountId = msg.accountInfo.id;
         if (msg.accountInfo?.allAccounts) {
           allAccounts = msg.accountInfo.allAccounts;
+          console.log("Got", allAccounts.length, "accounts");
           updateAccountSwitcher(currentAccountId);
         }
         updateSidebarAccount(msg.accountInfo);
