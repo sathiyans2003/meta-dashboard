@@ -90,42 +90,56 @@ app.get("/auth/facebook", (req, res) => {
 app.get("/auth/callback", async (req, res) => {
   const { code } = req.query;
   try {
-    const appId = process.env.META_APP_ID; const appSecret = process.env.META_APP_SECRET;
     const host = req.get("host"); 
-    const protocol = req.headers["x-forwarded-proto"] || req.protocol;
-    const redirect = `${protocol}://${host}/auth/callback`; // No manual encoding here
+    // Force HTTPS for production redirects to match Meta settings
+    const redirect = `https://${host}/auth/callback`;
     const axios = require("axios");
 
-    const tokenRes = await axios.get(`https://graph.facebook.com/v19.0/oauth/access_token`, {
-      params: {
-        client_id: appId,
-        redirect_uri: redirect,
-        client_secret: appSecret,
-        code: code
-      }
-    });
+    console.log("OAuth Redirecting with URI:", redirect);
 
-    const longRes = await axios.get(`https://graph.facebook.com/v19.0/oauth/access_token`, {
-      params: {
-        grant_type: "fb_exchange_token",
-        client_id: appId,
-        client_secret: appSecret,
-        fb_exchange_token: tokenRes.data.access_token
-      }
-    });
-    const token = longRes.data.access_token;
-
-    const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { params: { fields: "id,name,account_status,currency,timezone_name", access_token: token, limit: 50 } });
-    const accounts = (accRes.data?.data || []).filter(a => a.account_status === 1);
-
-    res.send(`
-      <html><body><script>
-        if (window.opener) {
-          window.opener.postMessage({ type: 'fb_connected', token: '${token}', accounts: ${JSON.stringify(accounts)} }, '*');
+    try {
+      const tokenRes = await axios.get(`https://graph.facebook.com/v19.0/oauth/access_token`, {
+        params: {
+          client_id: appId,
+          redirect_uri: redirect,
+          client_secret: appSecret,
+          code: code
         }
-        window.close();
-      </script></body></html>
-    `);
+      });
+
+      const longRes = await axios.get(`https://graph.facebook.com/v19.0/oauth/access_token`, {
+        params: {
+          grant_type: "fb_exchange_token",
+          client_id: appId,
+          client_secret: appSecret,
+          fb_exchange_token: tokenRes.data.access_token
+        }
+      });
+      const token = longRes.data.access_token;
+
+      const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { 
+        params: { fields: "id,name,account_status,currency,timezone_name", access_token: token, limit: 50 } 
+      });
+      const accounts = (accRes.data?.data || []).filter(a => a.account_status === 1);
+
+      res.send(`
+        <html><body><script>
+          if (window.opener) {
+            window.opener.postMessage({ type: 'fb_connected', token: '${token}', accounts: ${JSON.stringify(accounts)} }, '*');
+          }
+          window.close();
+        </script></body></html>
+      `);
+    } catch (apiErr) {
+      console.error("Meta API Error:", apiErr.response?.data || apiErr.message);
+      res.status(400).send(`
+        <h3>OAuth Error</h3>
+        <p><b>Message:</b> ${apiErr.response?.data?.error?.message || apiErr.message}</p>
+        <p><b>Redirect URI used:</b> ${redirect}</p>
+        <hr>
+        <p>Please ensure this URI is added to your Meta App Settings under "Valid OAuth Redirect URIs".</p>
+      `);
+    }
   } catch (err) { res.send(`OAuth Error: ${err.message}`); }
 });
 
