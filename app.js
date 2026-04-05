@@ -1,9 +1,10 @@
 const API = (window.location.protocol === "file:" || window.location.hostname === "" || window.location.hostname === "localhost") ? "http://localhost:4000/api" : window.location.origin + "/api";
-const WS  = (window.location.protocol === "file:" || window.location.hostname === "" || window.location.hostname === "localhost") ? "ws://localhost:4000" : (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host;
+const WS = (window.location.protocol === "file:" || window.location.hostname === "" || window.location.hostname === "localhost") ? "ws://localhost:4000" : (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host;
 
-let ws = null, data = null, reconn = null;
+let ws = null, data = null, reconn = null, pollTimer = null;
 let currentToken = null;
 let currentAccountId = null;
+let usePolling = false;
 let allAccounts = [];
 let selectedCampaignIds = new Set();
 let currentSearchData = { camp: "", adset: "", ad: "" };
@@ -22,10 +23,10 @@ window.onload = () => {
   currentAccountId = localStorage.getItem("meta_account_id");
 
   if (!currentToken || !currentAccountId) {
-    window.location.href = "index.html"; 
+    window.location.href = "index.html";
     return;
   }
-  
+
   loadColPrefs();
   const datePreset = localStorage.getItem("meta_date_preset") || "today";
   if (document.getElementById("datePresetSel")) {
@@ -38,7 +39,7 @@ window.onload = () => {
     try {
       const acc = JSON.parse(cachedAcc);
       updateSidebarAccount(acc);
-    } catch(e) {}
+    } catch (e) { }
   }
 
   connect();
@@ -56,10 +57,10 @@ function updateAccountSwitcher(activeId) {
     lbl.textContent = "Fetching Accounts...";
     return;
   }
-  
+
   const activeAcc = allAccounts.find(a => a.id === activeId) || allAccounts[0];
   lbl.textContent = activeAcc ? activeAcc.name : "Select Account";
-  
+
   renderAccList(allAccounts, activeId);
 }
 
@@ -67,7 +68,7 @@ function renderAccList(accounts, activeId) {
   const list = document.getElementById("accountSwitcherList");
   if (!list) return;
   list.innerHTML = accounts.map(a => `
-    <div class="acc-list-item ${a.id === activeId ? 'active' : ''}" onclick="switchAccount('${a.id.replace('act_','')}')" style="display:flex; justify-content:space-between; align-items:center;">
+    <div class="acc-list-item ${a.id === activeId ? 'active' : ''}" onclick="switchAccount('${a.id.replace('act_', '')}')" style="display:flex; justify-content:space-between; align-items:center;">
       <div>
         <div class="acc-list-name">${a.name}</div>
         <div class="acc-list-id">${a.id} · ${a.currency || ''}</div>
@@ -85,8 +86,8 @@ function filterAccounts() {
     renderAccList(allAccounts, currentAccountId);
     return;
   }
-  const filtered = allAccounts.filter(a => 
-    (a.name && a.name.toLowerCase().includes(q)) || 
+  const filtered = allAccounts.filter(a =>
+    (a.name && a.name.toLowerCase().includes(q)) ||
     (a.id && a.id.toLowerCase().includes(q))
   );
   renderAccList(filtered, currentAccountId);
@@ -109,8 +110,8 @@ function filterAccounts() {
     renderAccList(allAccounts, currentAccountId);
     return;
   }
-  const filtered = allAccounts.filter(a => 
-    (a.name && a.name.toLowerCase().includes(q)) || 
+  const filtered = allAccounts.filter(a =>
+    (a.name && a.name.toLowerCase().includes(q)) ||
     (a.id && a.id.toLowerCase().includes(q))
   );
   renderAccList(filtered, currentAccountId);
@@ -120,10 +121,10 @@ async function switchAccount(newAccountId) {
   closeAccountModal();
   const fullId = "act_" + newAccountId;
   if (!newAccountId || fullId === currentAccountId) return;
-  
+
   // Save the new account ID to localStorage
   localStorage.setItem("meta_account_id", fullId);
-  
+
   // Reload page to re-initialize everything with the new account
   window.location.reload();
 }
@@ -133,7 +134,7 @@ async function switchAccount(newAccountId) {
 // ══════════════════════════════════════════════════════════════
 document.querySelectorAll(".nav-link").forEach(a => {
   if (a.getAttribute("href") && a.getAttribute("href") !== "#") return; // Ignore links like explorer.html
-  
+
   a.addEventListener("click", e => {
     e.preventDefault();
     const tab = a.dataset.tab;
@@ -143,7 +144,7 @@ document.querySelectorAll(".nav-link").forEach(a => {
     a.classList.add("active");
     const pane = document.getElementById(`tab-${tab}`);
     if (pane) pane.classList.add("active");
-    const titles = { overview:"Overview", campaigns:"Campaigns", adsets:"Ad Sets", ads:"Ads" };
+    const titles = { overview: "Overview", campaigns: "Campaigns", adsets: "Ad Sets", ads: "Ads" };
     document.getElementById("pageH1").textContent = titles[tab] || tab;
     if (data) renderTab(tab);
   });
@@ -165,10 +166,10 @@ async function applyCustomDate() {
   const since = document.getElementById("startDate").value;
   const until = document.getElementById("endDate").value;
   if (!since || !until) return alert("Select both dates");
-  
+
   const range = { since, until };
   localStorage.setItem("meta_date_preset", JSON.stringify(range));
-  
+
   setStatus("wait");
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: "update_date", datePreset: range }));
@@ -178,10 +179,10 @@ async function applyCustomDate() {
 async function changeDatePreset(v) {
   setStatus("wait");
   localStorage.setItem("meta_date_preset", v);
-  
+
   const btn = document.getElementById("refreshBtn");
   if (btn) btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="animation:spin 0.8s linear infinite"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Updating...`;
-  
+
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({ type: "update_date", datePreset: v }));
   }
@@ -192,20 +193,30 @@ async function changeDatePreset(v) {
 // ══════════════════════════════════════════════════════════════
 function connect() {
   clearTimeout(reconn);
-  try { ws = new WebSocket(WS); } catch(_) { scheduleReconn(); return; }
+  try { ws = new WebSocket(WS); } catch (_) { scheduleReconn(); return; }
 
-  ws.onopen  = () => {
+  ws.onopen = () => {
     setStatus("ok");
-    // Send auth immediately
-    ws.send(JSON.stringify({ 
-      type: "auth", 
-      token: currentToken, 
+    usePolling = false;
+    clearInterval(pollTimer);
+    pollTimer = null;
+    ws.send(JSON.stringify({
+      type: "auth",
+      token: currentToken,
       accountId: currentAccountId,
       datePreset: localStorage.getItem("meta_date_preset") || "today"
     }));
   };
-  ws.onclose = () => { setStatus("err"); scheduleReconn(); };
-  ws.onerror = () => { setStatus("err"); };
+  ws.onclose = () => {
+    if (!usePolling) {
+      setStatus("wait");
+      startPolling();
+    }
+    scheduleReconn();
+  };
+  ws.onerror = () => {
+    if (!usePolling) startPolling();
+  };
 
   ws.onmessage = e => {
     try {
@@ -222,24 +233,17 @@ function connect() {
         if (msg.accountInfo?.id) currentAccountId = msg.accountInfo.id;
         if (msg.accountInfo?.allAccounts) {
           allAccounts = msg.accountInfo.allAccounts;
-          console.log("Got", allAccounts.length, "accounts");
           updateAccountSwitcher(currentAccountId);
-          
-          // Save for instant load next time
           const activeAcc = allAccounts.find(a => a.id === currentAccountId) || allAccounts[0];
-          if (activeAcc) {
-            localStorage.setItem("meta_last_account_info", JSON.stringify(activeAcc));
-          }
+          if (activeAcc) localStorage.setItem("meta_last_account_info", JSON.stringify(activeAcc));
         }
         updateSidebarAccount(msg.accountInfo);
       }
 
       if (msg.type === "status") {
         if (msg.status === "fetching") setStatus("wait");
-        if (msg.status === "error")    setStatus("err");
-        if (msg.status === "waiting_for_token") {
-          window.location.href = "index.html";
-        }
+        if (msg.status === "error") setStatus("err");
+        if (msg.status === "waiting_for_token") window.location.href = "index.html";
       }
 
       if (msg.type === "disconnected") {
@@ -250,13 +254,56 @@ function connect() {
       if (msg.type === "countdown") {
         document.getElementById("syncTime").textContent = `Next sync: ${msg.remaining}s`;
       }
-    } catch(_) {}
+    } catch (_) { }
   };
 
-  setInterval(() => { if (ws.readyState === 1) ws.send(JSON.stringify({ type:"ping" })); }, 10000);
+  setInterval(() => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "ping" })); }, 10000);
 }
 
-function scheduleReconn() { reconn = setTimeout(connect, 5000); }
+function scheduleReconn() {
+  if (reconn) return;
+  reconn = setTimeout(() => {
+    reconn = null;
+    if (!usePolling) {
+      console.log("Attempting WS Reconnect...");
+      connect();
+    }
+  }, 5000);
+}
+
+// ══════════════════════════════════════════════════════════════
+// POLLING FALLBACK (For Vercel/Shared Hosting)
+// ══════════════════════════════════════════════════════════════
+async function pollData() {
+  if (!currentToken || !currentAccountId) return;
+  try {
+    const res = await fetch(`${API}/data`, {
+      headers: {
+        "x-meta-token": currentToken,
+        "x-meta-account-id": currentAccountId,
+        "x-meta-date-preset": localStorage.getItem("meta_date_preset") || "today"
+      }
+    });
+    const result = await res.json();
+    if (result.ok) {
+      data = result.data;
+      onData({ type: "data", data, runCount: "Poll" });
+      setStatus("ok");
+    } else {
+      setStatus("err");
+    }
+  } catch (e) {
+    setStatus("err");
+  }
+}
+
+function startPolling() {
+  if (pollTimer) return;
+  console.log("Switching to HTTP Polling Mode (WS Not Supported)");
+  usePolling = true;
+  pollData();
+  pollTimer = setInterval(pollData, 60000); // Poll every minute
+}
 
 function disconnectFacebook() {
   if (!confirm("Disconnect pandhal ellaa data clear aagum. Continue?")) return;
@@ -277,10 +324,10 @@ function refreshData() {
 function setStatus(s) {
   const dot = document.getElementById("liveDot");
   const lbl = document.getElementById("liveLabel");
-  if(dot) dot.className = "live-dot" + (s==="err" ? " err" : s==="wait" ? " wait" : s==="ok" ? " ok" : "");
-  if(lbl) {
-    lbl.className = "live-label" + (s==="err" ? " err" : s==="wait" ? " wait" : s==="ok" ? " ok" : "");
-    lbl.textContent = s==="ok" ? "Live" : s==="wait" ? "Updating..." : "Disconnected";
+  if (dot) dot.className = "live-dot" + (s === "err" ? " err" : s === "wait" ? " wait" : s === "ok" ? " ok" : "");
+  if (lbl) {
+    lbl.className = "live-label" + (s === "err" ? " err" : s === "wait" ? " wait" : s === "ok" ? " ok" : "");
+    lbl.textContent = s === "ok" ? "Live" : s === "wait" ? "Updating..." : "Disconnected";
   }
 }
 
@@ -288,16 +335,16 @@ function updateSidebarAccount(acc) {
   if (!acc) return;
   document.getElementById("pageDesc").textContent = `${acc.name || ""} · ${acc.currency || ""}`;
   document.getElementById("sidebarAccName").textContent = acc.name || "—";
-  document.getElementById("sidebarAccId").textContent   = acc.id   || "—";
+  document.getElementById("sidebarAccId").textContent = acc.id || "—";
   if (document.getElementById("sidebarAccTz")) {
     document.getElementById("sidebarAccTz").textContent = acc.timezone || "—";
   }
-  
+
   // Also update Overview Tab banner
   if (document.getElementById("overviewAccName")) {
     document.getElementById("overviewAccName").textContent = acc.name || "—";
-    document.getElementById("overviewAccId").textContent   = acc.id   || "—";
-    document.getElementById("overviewAccTz").textContent   = acc.timezone_name || acc.timezone || "—";
+    document.getElementById("overviewAccId").textContent = acc.id || "—";
+    document.getElementById("overviewAccTz").textContent = acc.timezone_name || acc.timezone || "—";
   }
 }
 
@@ -311,10 +358,10 @@ function onData(msg) {
   if (document.getElementById("runCount")) {
     document.getElementById("runCount").textContent = `Run #${rc || 1}`;
   }
-  
+
   const camps = data.campaigns || [];
   const adsets = data.adsets || [];
-  const ads    = data.ads || [];
+  const ads = data.ads || [];
 
   const cLive = camps.filter(c => c.status === "ACTIVE").length;
   const sLive = adsets.filter(s => s.status === "ACTIVE").length;
@@ -324,8 +371,8 @@ function onData(msg) {
     document.getElementById("pageDesc").textContent =
       `${camps.length} Campaigns (${cLive} Live) · ${adsets.length} Ad Sets · ${ads.length} Ads (${aLive} Live)`;
   }
-    
-  applySelectionFilter(); 
+
+  applySelectionFilter();
   const activeTab = document.querySelector(".nav-link.active")?.dataset?.tab || "overview";
   renderTab(activeTab);
 }
@@ -399,25 +446,25 @@ function getActiveCols(tab) {
 
 function renderTab(tab) {
   if (!data) return;
-  if (tab === "overview")   applySelectionFilter();
-  if (tab === "campaigns")  renderTable("camp",  getFilteredData("camp"), getActiveCols("camp"));
-  if (tab === "adsets")     renderTable("adset", getFilteredData("adset"), getActiveCols("adset"));
-  if (tab === "ads")        renderTable("ad",    getFilteredData("ad"), getActiveCols("ad"));
+  if (tab === "overview") applySelectionFilter();
+  if (tab === "campaigns") renderTable("camp", getFilteredData("camp"), getActiveCols("camp"));
+  if (tab === "adsets") renderTable("adset", getFilteredData("adset"), getActiveCols("adset"));
+  if (tab === "ads") renderTable("ad", getFilteredData("ad"), getActiveCols("ad"));
 }
 
 function getFilteredData(tabPrefix) {
   const map = { camp: "campaigns", adset: "adsets", ad: "ads" };
   let rows = data[map[tabPrefix]] || [];
-  
+
   // 1. Search Query
   const q = currentSearchData[tabPrefix];
   if (q) {
-    rows = rows.filter(r => 
-      (r.name && r.name.toLowerCase().includes(q)) || 
+    rows = rows.filter(r =>
+      (r.name && r.name.toLowerCase().includes(q)) ||
       (r.id && r.id.toLowerCase().includes(q))
     );
   }
-  
+
   // 2. Status Filter
   const s = currentStatusFilter[tabPrefix];
   if (s !== "ALL") {
@@ -429,7 +476,7 @@ function getFilteredData(tabPrefix) {
       return true;
     });
   }
-  
+
   // 3. Sorting
   const sort = currentSort[tabPrefix];
   if (sort && sort.k) {
@@ -448,7 +495,7 @@ function getFilteredData(tabPrefix) {
       return 0;
     });
   }
-  
+
   return rows;
 }
 
@@ -479,7 +526,7 @@ function renderOverview(s, isFiltered = false) {
   if (kpiTitle) {
     const range = s.dateStart && s.dateStop ? `${s.dateStart} — ${s.dateStop}` : "";
     const rangeLabel = range ? `<span style="color:var(--muted); font-size:11px; margin-left:12px; font-weight:400;">Range: ${range}</span>` : "";
-    kpiTitle.innerHTML = isFiltered 
+    kpiTitle.innerHTML = isFiltered
       ? `Top KPIs ${rangeLabel} <span style="color:var(--fb); font-size:11px; margin-left:10px; font-weight:700;">• FILTERED</span>`
       : `Top KPIs ${rangeLabel} <span style="color:var(--muted); font-size:11px; margin-left:10px; font-weight:400;">• ACCOUNT TOTAL</span>`;
   }
@@ -499,59 +546,59 @@ function renderOverview(s, isFiltered = false) {
   }).filter(Boolean);
 
   document.getElementById("kpiStrip").innerHTML =
-    kpis.map(k=>`<div class="kpi"><div class="kpi-v">${k.v}</div><div class="kpi-l">${k.l}</div></div>`).join("");
+    kpis.map(k => `<div class="kpi"><div class="kpi-v">${k.v}</div><div class="kpi-l">${k.l}</div></div>`).join("");
 
   document.getElementById("convGrid").innerHTML = [
-    { l:"Purchases",       v:fmtBig(s.purchases),       c:"c-green" },
-    { l:"Leads",           v:fmtBig(s.leads),           c:"c-blue"  },
-    { l:"Conversations",   v:fmtBig(s.messagingConversations), c:"c-purple" },
-    { l:"Results",         v:fmtBig(s.results),         c:""        },
-  ].map(c=>`<div class="conv-cell"><div class="conv-cell-label">${c.l}</div><div class="conv-cell-val ${c.c}">${c.v}</div></div>`).join("");
+    { l: "Purchases", v: fmtBig(s.purchases), c: "c-green" },
+    { l: "Leads", v: fmtBig(s.leads), c: "c-blue" },
+    { l: "Conversations", v: fmtBig(s.messagingConversations), c: "c-purple" },
+    { l: "Results", v: fmtBig(s.results), c: "" },
+  ].map(c => `<div class="conv-cell"><div class="conv-cell-label">${c.l}</div><div class="conv-cell-val ${c.c}">${c.v}</div></div>`).join("");
 
   document.getElementById("engGrid").innerHTML = [
-    ["Link Clicks",     fmtBig(s.linkClicks)],
-    ["Landing Page",    fmtBig(s.landingPageViews)],
-    ["CTR (%)",         `${s.ctr}%`],
-    ["CPC (₹)",         fmtM(s.cpc)],
-    ["Reach",           fmtBig(s.reach)],
-    ["Frequency",       s.frequency],
-  ].map(([l,v])=>`<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
+    ["Link Clicks", fmtBig(s.linkClicks)],
+    ["Landing Page", fmtBig(s.landingPageViews)],
+    ["CTR (%)", `${s.ctr}%`],
+    ["CPC (₹)", fmtM(s.cpc)],
+    ["Reach", fmtBig(s.reach)],
+    ["Frequency", s.frequency],
+  ].map(([l, v]) => `<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
 
   const roas = parseFloat(s.purchaseRoas);
-  document.getElementById("delivChip").textContent = roas>=2 ? "Healthy 🟢" : roas>=1 ? "Average 🟡" : "Low 🔴";
-  document.getElementById("delivChip").className = "chip " + (roas>=2?"chip--green":roas>=1?"chip--amber":"chip--red");
+  document.getElementById("delivChip").textContent = roas >= 2 ? "Healthy 🟢" : roas >= 1 ? "Average 🟡" : "Low 🔴";
+  document.getElementById("delivChip").className = "chip " + (roas >= 2 ? "chip--green" : roas >= 1 ? "chip--amber" : "chip--red");
 
   document.getElementById("delivGrid").innerHTML = [
-    { l:"Frequency",    v:s.frequency },
-    { l:"Reach",        v:fmtBig(s.reach) },
-    { l:"CPM (₹)",      v:fmtM(s.cpm) },
-    { l:"CPC (₹)",      v:fmtM(s.cpc) },
-    { l:"ROAS",         v:`${s.purchaseRoas}×` },
-    { l:"Spend (₹)",    v:fmtM(s.spend) },
-  ].map(h=>`<div class="deliv-cell"><div class="deliv-cell-lbl">${h.l}</div><div class="deliv-cell-val">${h.v}</div></div>`).join("");
+    { l: "Frequency", v: s.frequency },
+    { l: "Reach", v: fmtBig(s.reach) },
+    { l: "CPM (₹)", v: fmtM(s.cpm) },
+    { l: "CPC (₹)", v: fmtM(s.cpc) },
+    { l: "ROAS", v: `${s.purchaseRoas}×` },
+    { l: "Spend (₹)", v: fmtM(s.spend) },
+  ].map(h => `<div class="deliv-cell"><div class="deliv-cell-lbl">${h.l}</div><div class="deliv-cell-val">${h.v}</div></div>`).join("");
 
   document.getElementById("videoGrid").innerHTML = [
-    ["Video Views",     fmtBig(s.videoViews||0)],
-    ["Video 100%",      fmtBig(s.v100||0)],
-    ["Post Engagement", fmtBig(s.postEngagement||0)],
-    ["Result Rate",     `${s.resultRate}%`],
-  ].map(([l,v])=>`<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
+    ["Video Views", fmtBig(s.videoViews || 0)],
+    ["Video 100%", fmtBig(s.v100 || 0)],
+    ["Post Engagement", fmtBig(s.postEngagement || 0)],
+    ["Result Rate", `${s.resultRate}%`],
+  ].map(([l, v]) => `<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
 
   document.getElementById("qualityGrid").innerHTML = [
-    ["Quality Ranking",     s.qualityRanking     || "N/A"],
-    ["Engagement Ranking",  s.engagementRanking  || "N/A"],
-    ["Conversion Ranking",  s.conversionRanking  || "N/A"],
-    ["Unique Clicks",       fmtBig(s.uniqueClicks||0)],
-    ["Unique CTR",          `${s.uniqueCtr||0}%`],
-  ].map(([l,v])=>`<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
+    ["Quality Ranking", s.qualityRanking || "N/A"],
+    ["Engagement Ranking", s.engagementRanking || "N/A"],
+    ["Conversion Ranking", s.conversionRanking || "N/A"],
+    ["Unique Clicks", fmtBig(s.uniqueClicks || 0)],
+    ["Unique CTR", `${s.uniqueCtr || 0}%`],
+  ].map(([l, v]) => `<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
 
   document.getElementById("costGrid").innerHTML = [
-    ["Cost/Result",         fmtM(s.costPerResult||0)],
-    ["Cost/Purchase",       fmtM(s.costPerPurchase||0)],
-    ["Cost/Lead",           fmtM(s.costPerLead||0)],
-    ["Cost/Conv.",          fmtM(s.costPerConversation||0)],
-    ["Purchase Value (₹)",  fmtM(s.purchaseValue||0)],
-  ].map(([l,v])=>`<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
+    ["Cost/Result", fmtM(s.costPerResult || 0)],
+    ["Cost/Purchase", fmtM(s.costPerPurchase || 0)],
+    ["Cost/Lead", fmtM(s.costPerLead || 0)],
+    ["Cost/Conv.", fmtM(s.costPerConversation || 0)],
+    ["Purchase Value (₹)", fmtM(s.purchaseValue || 0)],
+  ].map(([l, v]) => `<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -598,9 +645,9 @@ const ALL_METRICS = [
   { k: "dateStop", h: "Date Stop", f: "text" }
 ];
 
-const campCols = [ { h:"Campaign ID", k:"id", f:"id" }, { h:"Campaign", k:"name", f:"name" }, { h:"Status", k:"status", f:"status" }, { h:"Objective", k:"objective", f:"text" }, ...ALL_METRICS ];
-const adsetCols = [ { h:"Ad Set ID", k:"id", f:"id" }, { h:"Ad Set", k:"name", f:"name" }, { h:"Campaign", k:"campaignName", f:"text" }, { h:"Status", k:"status", f:"status" }, ...ALL_METRICS ];
-const adCols = [ { h:"Ad ID", k:"id", f:"id" }, { h:"Ad Name", k:"name", f:"name" }, { h:"Ad Set", k:"adsetName", f:"text" }, { h:"Campaign", k:"campaignName", f:"text" }, { h:"Status", k:"status", f:"status" }, ...ALL_METRICS ];
+const campCols = [{ h: "Campaign ID", k: "id", f: "id" }, { h: "Campaign", k: "name", f: "name" }, { h: "Status", k: "status", f: "status" }, { h: "Objective", k: "objective", f: "text" }, ...ALL_METRICS];
+const adsetCols = [{ h: "Ad Set ID", k: "id", f: "id" }, { h: "Ad Set", k: "name", f: "name" }, { h: "Campaign", k: "campaignName", f: "text" }, { h: "Status", k: "status", f: "status" }, ...ALL_METRICS];
+const adCols = [{ h: "Ad ID", k: "id", f: "id" }, { h: "Ad Name", k: "name", f: "name" }, { h: "Ad Set", k: "adsetName", f: "text" }, { h: "Campaign", k: "campaignName", f: "text" }, { h: "Status", k: "status", f: "status" }, ...ALL_METRICS];
 
 let activeColIds = {
   overview: ["spend", "results", "costPerResult", "impressions", "clicks", "ctr", "purchaseRoas", "reach"],
@@ -624,7 +671,7 @@ function loadColPrefs() {
         }
       });
     }
-  } catch(e) {}
+  } catch (e) { }
 }
 
 let currentColEditingTab = null;
@@ -639,15 +686,15 @@ const PRESETS = {
 function applyPreset(pKey) {
   if (!currentColEditingTab || !PRESETS[pKey]) return;
   const ids = PRESETS[pKey].cols;
-  
+
   // Ensure we keep table-specific fixed IDs if editing camp/adset/ad
   let finalIds = [];
   if (currentColEditingTab === "camp") finalIds = ["id", "name", "status"];
   else if (currentColEditingTab === "adset") finalIds = ["id", "name", "campaignName", "status"];
   else if (currentColEditingTab === "ad") finalIds = ["id", "name", "adsetName", "campaignName", "status"];
-  
+
   finalIds = [...finalIds, ...ids];
-  
+
   // Update checkboxes in modal
   const chks = document.querySelectorAll(".col-chk");
   chks.forEach(chk => {
@@ -661,7 +708,7 @@ function openColSettings(tabPrefix) {
   if (tabPrefix === "overview") all = ALL_METRICS;
   else all = { camp: campCols, adset: adsetCols, ad: adCols }[tabPrefix];
 
-  const ttls = { overview:"Top KPI Strip", camp:"Campaign Columns", adset:"Ad Set Columns", ad:"Ad Columns" };
+  const ttls = { overview: "Top KPI Strip", camp: "Campaign Columns", adset: "Ad Set Columns", ad: "Ad Columns" };
   document.getElementById("colModalTtl").textContent = ttls[tabPrefix] || "Customize Columns";
 
   let fixedIds = [];
@@ -671,7 +718,7 @@ function openColSettings(tabPrefix) {
 
   // Exclude fixed columns from manual configuration
   const configurableCols = all.filter(c => !fixedIds.includes(c.k));
-  
+
   const allActiveIds = activeColIds[tabPrefix] || [];
   const activeConfigurableIds = allActiveIds.filter(id => !fixedIds.includes(id));
 
@@ -726,9 +773,9 @@ function updateColSelectedStrip() {
   const chks = document.querySelectorAll("#colModalList .col-chk");
   const selected = [];
   chks.forEach(chk => { if (chk.checked) selected.push({ k: chk.value, h: chk.closest('.col-opt').querySelector('.col-label').textContent }); });
-  
+
   document.getElementById("colSelectedCount").textContent = `(${selected.length})`;
-  
+
   const strip = document.getElementById("colSelectedStrip");
   if (!strip) return;
   strip.innerHTML = selected.length ? selected.map(s =>
@@ -781,9 +828,9 @@ function resetColDefaults() {
   if (!currentColEditingTab) return;
   const defaults = {
     overview: ["spend", "results", "costPerResult", "impressions", "clicks", "ctr", "purchaseRoas", "reach"],
-    camp:  ["id", "name", "status", "results", "costPerResult", "spend", "impressions", "ctr", "purchases", "purchaseRoas"],
+    camp: ["id", "name", "status", "results", "costPerResult", "spend", "impressions", "ctr", "purchases", "purchaseRoas"],
     adset: ["id", "name", "status", "results", "costPerResult", "spend", "ctr", "cpm", "cpc", "purchases", "purchaseRoas"],
-    ad:    ["id", "name", "status", "results", "costPerResult", "spend", "ctr", "cpm", "cpc", "purchases", "purchaseRoas", "linkClicks"]
+    ad: ["id", "name", "status", "results", "costPerResult", "spend", "ctr", "cpm", "cpc", "purchases", "purchaseRoas", "linkClicks"]
   };
   const ids = defaults[currentColEditingTab] || [];
   document.querySelectorAll('#colModalList .col-chk').forEach(chk => {
@@ -840,7 +887,7 @@ function saveColSettings() {
   }
 
   activeColIds[currentColEditingTab] = finalIds;
-  try { localStorage.setItem("metaColPrefs", JSON.stringify(activeColIds)); } catch(e){}
+  try { localStorage.setItem("metaColPrefs", JSON.stringify(activeColIds)); } catch (e) { }
 
   closeColSettings();
 
@@ -855,14 +902,14 @@ function saveColSettings() {
 }
 
 function renderTable(id, rows, cols) {
-  const countId = { camp:"campCount", adset:"adsetCount", ad:"adCount" };
+  const countId = { camp: "campCount", adset: "adsetCount", ad: "adCount" };
   const container = document.getElementById(countId[id]);
-  
+
   if (container && rows) {
     const total = rows.length;
     const active = rows.filter(r => String(r.status).toUpperCase() === "ACTIVE").length;
     const paused = rows.filter(r => String(r.status).toUpperCase() === "PAUSED").length;
-    
+
     container.innerHTML = `
       <b style="color:var(--text);">${total}</b> <span style="font-size:10px; opacity:0.7;">TOTAL</span>
       <span style="margin:0 6px; opacity:0.3;">|</span>
@@ -882,7 +929,7 @@ function renderTable(id, rows, cols) {
 
 
   const thead = document.getElementById(`${id}Head`);
-  if (thead) { 
+  if (thead) {
     const sort = currentSort[id];
     let headHtml = cols.map(c => {
       const isSorted = sort.k === c.k;
@@ -890,7 +937,7 @@ function renderTable(id, rows, cols) {
       const sortCls = isSorted ? "sort-active" : "";
       return `<th onclick="handleSort('${id}', '${c.k}')" class="sortable ${sortCls}">${c.h}${arrow}</th>`;
     }).join("");
-    
+
     // Always add a leading column for consistency (checkbox or spacer)
     if (id === "camp") {
       headHtml = `<th style="width:40px; text-align:center;"><input type="checkbox" id="selectAllCamps" onchange="toggleSelectAllCamps(this.checked)" ${selectedCampaignIds.size > 0 && selectedCampaignIds.size === rows.length ? 'checked' : ''} /></th>` + headHtml;
@@ -903,13 +950,13 @@ function renderTable(id, rows, cols) {
   const tbody = document.getElementById(`${id}Body`);
   if (!tbody) return;
   if (!rows?.length) {
-    tbody.innerHTML = `<tr><td colspan="${cols.length + (id==="camp"?1:0)}" style="text-align:center;padding:40px;color:var(--muted)">No data available</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${cols.length + (id === "camp" ? 1 : 0)}" style="text-align:center;padding:40px;color:var(--muted)">No data available</td></tr>`;
     return;
   }
 
   // Calculate Totals row
   let totalRow = { name: "TOTAL ALL", status: "", isTotal: true };
-  
+
   // Base sum across ALL known metrics to ensure derived metrics calculate properly
   // We extract all keys from ALL_METRICS to do the summation
   const allMetricKeys = ALL_METRICS.map(m => m.k);
@@ -932,23 +979,23 @@ function renderTable(id, rows, cols) {
     totalRow.cpm = totalRow.impressions > 0 ? (totalRow.spend / (totalRow.impressions / 1000)).toFixed(2) : "0.00";
     totalRow.purchaseRoas = totalRow.spend > 0 ? (totalRow.purchaseValue / totalRow.spend).toFixed(2) : "0.00";
   }
-  
+
   if (totalRow.impressions !== undefined) {
     totalRow.ctr = totalRow.impressions > 0 ? ((totalRow.clicks / totalRow.impressions) * 100).toFixed(2) : "0.00";
     totalRow.resultRate = totalRow.impressions > 0 ? ((totalRow.results / totalRow.impressions) * 100).toFixed(2) : "0.00";
   }
-  
+
   if (totalRow.reach !== undefined) {
     totalRow.frequency = totalRow.reach > 0 ? (totalRow.impressions / totalRow.reach).toFixed(2) : "1.00";
     totalRow.uniqueCtr = totalRow.reach > 0 ? ((totalRow.uniqueClicks / totalRow.reach) * 100).toFixed(2) : "0.00";
   }
 
-  let totalTrHtml = cols.map(c=>`<td class="${tdClass(c.f)}">${fmtCell(totalRow[c.k],c.f)}</td>`).join("");
+  let totalTrHtml = cols.map(c => `<td class="${tdClass(c.f)}">${fmtCell(totalRow[c.k], c.f)}</td>`).join("");
   totalTrHtml = `<td></td>` + totalTrHtml; // Leader spacer for all tables
   const totalTr = `<tr class="tr-total">${totalTrHtml}</tr>`;
 
   tbody.innerHTML = totalTr + rows.map(r => {
-    let rowHtml = cols.map(c=>`<td class="${tdClass(c.f)}">${fmtCell(r[c.k],c.f)}</td>`).join("");
+    let rowHtml = cols.map(c => `<td class="${tdClass(c.f)}">${fmtCell(r[c.k], c.f)}</td>`).join("");
     if (id === "camp") {
       const isChecked = selectedCampaignIds.has(r.id) ? "checked" : "";
       rowHtml = `<td style="text-align:center;"><input type="checkbox" class="row-chk" onchange="toggleCampSelection('${r.id}')" ${isChecked} /></td>` + rowHtml;
@@ -982,23 +1029,23 @@ function clearCampSelection() {
   renderTable("camp", getFilteredData("camp"), getActiveCols("camp"));
 }
 
-function tdClass(f) { return f==="money"?"td-money":f==="roas"?"td-roas":f==="muted"||f==="id"?"td-muted":""; }
+function tdClass(f) { return f === "money" ? "td-money" : f === "roas" ? "td-roas" : f === "muted" || f === "id" ? "td-muted" : ""; }
 
 function fmtCell(v, f) {
-  if (v==null||v==="") return `<span style="color:var(--dim)">—</span>`;
-  switch(f) {
+  if (v == null || v === "") return `<span style="color:var(--dim)">—</span>`;
+  switch (f) {
     case "status": {
       const s = String(v).toUpperCase();
-      const cls = s==="ACTIVE"?"active":s==="PAUSED"?"paused":"archived";
-      const lbl = s==="ACTIVE"?"LIVE":s==="PAUSED"?"OFFLINE":s;
+      const cls = s === "ACTIVE" ? "active" : s === "PAUSED" ? "paused" : "archived";
+      const lbl = s === "ACTIVE" ? "LIVE" : s === "PAUSED" ? "OFFLINE" : s;
       return `<span class="badge badge-${cls}">${lbl}</span>`;
     }
     case "money": return `₹${fmtM(v)}`;
-    case "roas":  return `${v}×`;
-    case "pct":   return `${v}%`;
-    case "big":   return fmtBig(v);
-    case "id":    return `<span style="font-family:var(--ff-mono);font-size:10.5px;color:var(--muted)">${v}</span>`;
-    default:      return String(v);
+    case "roas": return `${v}×`;
+    case "pct": return `${v}%`;
+    case "big": return fmtBig(v);
+    case "id": return `<span style="font-family:var(--ff-mono);font-size:10.5px;color:var(--muted)">${v}</span>`;
+    default: return String(v);
   }
 }
 
@@ -1006,18 +1053,18 @@ async function manualRefresh() {
   const btn = document.getElementById("refreshBtn");
   btn.disabled = true;
   btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="animation:spin 0.8s linear infinite"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refreshing`;
-  try { await fetch(`${API}/refresh`,{method:"POST"}); } catch(_){}
-  setTimeout(()=>{
-    btn.disabled=false;
-    btn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
+  try { await fetch(`${API}/refresh`, { method: "POST" }); } catch (_) { }
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
   }, 2500);
 }
 
-function fmtM(v) { return parseFloat(v||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtM(v) { return parseFloat(v || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtBig(v) {
-  const n = parseFloat(v||0);
-  if (n>=1e7) return (n/1e7).toFixed(2)+"Cr";
-  if (n>=1e5) return (n/1e5).toFixed(2)+"L";
-  if (n>=1e3) return (n/1e3).toFixed(1)+"K";
+  const n = parseFloat(v || 0);
+  if (n >= 1e7) return (n / 1e7).toFixed(2) + "Cr";
+  if (n >= 1e5) return (n / 1e5).toFixed(2) + "L";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
   return n.toLocaleString("en-IN");
 }
