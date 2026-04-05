@@ -75,7 +75,7 @@ app.get("/auth/facebook", (req, res) => {
   const host = req.get("host");
   const protocol = (host.includes("localhost") || host.includes("127.0.0.1")) ? "http" : "https";
   const redirect = encodeURIComponent(`${protocol}://${host}/auth/callback`);
-  const scope = "ads_read,ads_management,business_management,pages_read_engagement";
+  const scope = "ads_read,business_management";
   res.redirect(`https://www.facebook.com/dialog/oauth?client_id=${appId}&redirect_uri=${redirect}&scope=${scope}&response_type=code`);
 });
 
