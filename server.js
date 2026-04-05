@@ -86,8 +86,9 @@ app.get("/auth/callback", async (req, res) => {
       window.close();
     </script></body></html>`);
   } catch (err) {
-    console.error("Auth Callback Account Fetch Error:", err.response?.data || err.message);
-    res.status(400).send(`<h3>OAuth Error</h3><p>${err.message}</p>`);
+    const errorMsg = err.response?.data?.error?.message || err.message;
+    console.error("Auth Callback Error:", errorMsg);
+    res.status(400).send(`<h3>OAuth Error</h3><p>${errorMsg}</p><p><a href="/">Try Again</a></p>`);
   }
 });
 
