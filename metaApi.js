@@ -34,74 +34,45 @@ function fmt(val, d = 2) {
   return parseFloat(val || 0).toFixed(d);
 }
 
+// ── Pick first matching type (no double-count) ───────────────────────────────
+function getFirstMatch(actions = [], types = []) {
+  if (!Array.isArray(actions)) return 0;
+  for (const t of types) {
+    const f = actions.find(a => a.action_type === t);
+    if (f && parseFloat(f.value) > 0) return parseFloat(f.value);
+  }
+  return 0;
+}
+
 function getResultsCount(actions = [], objective) {
   if (!Array.isArray(actions)) return 0;
   const obj = String(objective || "").toUpperCase();
 
-  const map = {
-    'OUTCOME_SALES': [
-      'purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase', 
-      'add_to_cart', 'complete_registration', 'offsite_conversion.fb_pixel_complete_registration', 'submit_application'
-    ],
-    'OUTCOME_LEADS': [
-      'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 
-      'onsite_conversion.total_lead_value', 'complete_registration', 'offsite_conversion.fb_pixel_complete_registration', 
-      'submit_application', 'offsite_conversion.fb_pixel_custom'
-    ],
-    'OUTCOME_ENGAGEMENT': [
-      'onsite_conversion.messaging_conversation_started_7d', 'post_engagement', 'page_engagement', 
-      'onsite_conversion.messaging_conversation_started_1d', 'contact', 'onsite_conversion.messaging_conversation_started_grouped'
-    ],
-    'OUTCOME_TRAFFIC': ['landing_page_view', 'link_click'],
-    'OUTCOME_AWARENESS': ['reach', 'impressions'],
+  // For each objective, use priority order — pick FIRST match only (no summing duplicates)
+  const priorityMap = {
+    'OUTCOME_SALES':         ['omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_conversion.purchase', 'purchase'],
+    'OUTCOME_LEADS':         ['omni_lead', 'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'],
+    'OUTCOME_ENGAGEMENT':    ['onsite_conversion.messaging_conversation_started_7d', 'post_engagement', 'page_engagement'],
+    'OUTCOME_TRAFFIC':       ['landing_page_view', 'link_click'],
+    'OUTCOME_AWARENESS':     ['reach'],
     'OUTCOME_APP_PROMOTION': ['app_install']
   };
 
-  // 1. If specific objective is known, sum the relevant action types
-  if (obj && map[obj]) {
-    const types = map[obj];
-    let totalValue = 0;
-    let foundAny = false;
-    for (const t of types) {
-      const f = actions.find(a => a.action_type === t);
-      if (f) {
-        totalValue += parseFloat(f.value || 0);
-        foundAny = true;
-      }
-    }
-    // If it's a Sales/Lead/Messaging objective, return the sum (even if 0) to match campaign goal
-    if (['OUTCOME_SALES', 'OUTCOME_LEADS', 'OUTCOME_ENGAGEMENT'].includes(obj)) {
-      return totalValue;
-    }
-    if (foundAny && totalValue > 0) return totalValue;
-  }
-
-  // 2. Fallback: Sum core conversion metrics if objective is unknown or fallback needed
-  const coreConversions = [
-    'purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase',
-    'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 'onsite_conversion.total_lead_value',
-    'onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started_1d',
-    'complete_registration', 'offsite_conversion.fb_pixel_complete_registration', 'submit_application', 'offsite_conversion.fb_pixel_custom'
-  ];
-
-  let coreSum = 0;
-  let foundCore = false;
-  for (const t of coreConversions) {
-    const f = actions.find(a => a.action_type === t);
-    if (f) {
-      coreSum += parseFloat(f.value || 0);
-      foundCore = true;
+  if (obj && priorityMap[obj]) {
+    const val = getFirstMatch(actions, priorityMap[obj]);
+    // For these objectives always return (even if 0) — don't fall through
+    if (['OUTCOME_SALES', 'OUTCOME_LEADS', 'OUTCOME_ENGAGEMENT', 'OUTCOME_TRAFFIC', 'OUTCOME_AWARENESS', 'OUTCOME_APP_PROMOTION'].includes(obj)) {
+      return val;
     }
   }
 
-  if (foundCore && coreSum > 0) return coreSum;
-
-  // 3. Last fallback (Traffic ads etc)
-  const lp = actions.find(a => a.action_type === 'landing_page_view');
-  if (lp && parseFloat(lp.value) > 0) return parseFloat(lp.value);
-  
-  const lc = actions.find(a => a.action_type === 'link_click');
-  return parseFloat(lc?.value || 0);
+  // Unknown objective fallback: try common conversion types in priority order
+  return getFirstMatch(actions, [
+    'omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'purchase',
+    'omni_lead', 'lead', 'offsite_conversion.fb_pixel_lead',
+    'onsite_conversion.messaging_conversation_started_7d',
+    'landing_page_view', 'link_click'
+  ]);
 }
 
 function applyDate(params, datePreset, isNested = false) {
@@ -206,20 +177,20 @@ function parseMetrics(d) {
   const cpRes = resCount > 0 ? (spend / resCount) : 0;
   const resRate = imps > 0 ? ((resCount / imps) * 100).toFixed(2) : "0";
 
-  const purchCount = parseFloat(getSum(ac, ['purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase']));
+  // ── Purchases: omni_purchase = Meta's deduplicated total (matches Ads Manager exactly)
+  const purchCount = getFirstMatch(ac, ['omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_conversion.purchase', 'purchase']);
   const cpPurch = purchCount > 0 ? (spend / purchCount) : 0;
 
-  const leadCount = parseFloat(getSum(ac, [
-    'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead', 'omni_lead', 
-    'onsite_conversion.total_lead_value', 'complete_registration', 'offsite_conversion.fb_pixel_complete_registration',
-    'contact', 'offsite_conversion.fb_pixel_contact', 'submit_form', 'submit_application'
-  ]));
+  // ── Leads: omni_lead = deduplicated total
+  const leadCount = getFirstMatch(ac, ['omni_lead', 'lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead']);
   const cpLead = leadCount > 0 ? (spend / leadCount) : 0;
 
-  const msgCount = parseFloat(getSum(ac, ['onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started_1d']));
+  // ── Messaging Conversations: 7d window takes priority
+  const msgCount = getFirstMatch(ac, ['onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.messaging_conversation_started_1d']);
   const cpMsg = msgCount > 0 ? (spend / msgCount) : 0;
 
-  const purchValue = getSum(av, ['purchase', 'onsite_conversion.purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase']);
+  // ── Purchase Value: use omni_purchase value (deduplicated)
+  const purchValue = getFirstMatch(av, ['omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'onsite_conversion.purchase', 'purchase']);
 
   return {
     status: d.status || "UNKNOWN",
