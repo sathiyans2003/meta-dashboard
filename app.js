@@ -1,6 +1,34 @@
 const API = (window.location.protocol === "file:" || window.location.hostname === "" || window.location.hostname === "localhost") ? "http://localhost:4000/api" : window.location.origin + "/api";
 const WS = (window.location.protocol === "file:" || window.location.hostname === "" || window.location.hostname === "localhost") ? "ws://localhost:4000" : (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host;
 
+// ── Error Banner ────────────────────────────────────────────────
+function showErrorBanner(msg, isFatal = false) {
+  let banner = document.getElementById('errBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'errBanner';
+    banner.style.cssText = `position:fixed;top:0;left:0;right:0;z-index:99999;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;font-weight:500;color:#fff;animation:slideDown 0.3s ease;`;
+    document.body.appendChild(banner);
+  }
+  banner.style.background = isFatal ? '#e53935' : '#e65100';
+  banner.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span>${msg}</span>
+    </div>
+    ${isFatal 
+      ? `<button onclick="window.location.href='index.html'" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:#fff;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Reconnect →</button>`
+      : `<button onclick="document.getElementById('errBanner').style.display='none'" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;">✕</button>`
+    }
+  `;
+  banner.style.display = 'flex';
+}
+
+function hideErrorBanner() {
+  const b = document.getElementById('errBanner');
+  if (b) b.style.display = 'none';
+}
+
 let ws = null, data = null, reconn = null, pollTimer = null;
 let currentToken = null;
 let currentAccountId = null;
@@ -193,13 +221,13 @@ async function changeDatePreset(v) {
 // ══════════════════════════════════════════════════════════════
 function connect() {
   clearTimeout(reconn);
-  try { ws = new WebSocket(WS); } catch (_) { scheduleReconn(); return; }
+  try { ws = new WebSocket(WS); } catch (_) { startPolling(); return; }
 
   ws.onopen = () => {
-    setStatus("ok");
     usePolling = false;
     clearInterval(pollTimer);
     pollTimer = null;
+    setStatus("wait");
     ws.send(JSON.stringify({
       type: "auth",
       token: currentToken,
@@ -207,14 +235,16 @@ function connect() {
       datePreset: localStorage.getItem("meta_date_preset") || "today"
     }));
   };
-  ws.onclose = () => {
+  ws.onclose = (evt) => {
+    console.log(`[WS] Closed — code: ${evt.code}`);
     if (!usePolling) {
       setStatus("wait");
       startPolling();
     }
     scheduleReconn();
   };
-  ws.onerror = () => {
+  ws.onerror = (err) => {
+    console.log("[WS] Error — switching to polling");
     if (!usePolling) startPolling();
   };
 
@@ -224,6 +254,7 @@ function connect() {
 
       if (msg.type === "data") {
         data = msg.data;
+        hideErrorBanner();
         onData(msg);
       }
 
@@ -238,12 +269,30 @@ function connect() {
           if (activeAcc) localStorage.setItem("meta_last_account_info", JSON.stringify(activeAcc));
         }
         updateSidebarAccount(msg.accountInfo);
+        setStatus("wait"); // waiting for data
       }
 
       if (msg.type === "status") {
         if (msg.status === "fetching") setStatus("wait");
-        if (msg.status === "error") setStatus("err");
+        if (msg.status === "error") {
+          setStatus("err", msg.error || "Sync failed");
+          if (msg.error) showErrorBanner(msg.error);
+        }
         if (msg.status === "waiting_for_token") window.location.href = "index.html";
+      }
+
+      // ── New: Detailed sync error from server ──
+      if (msg.type === "sync_error") {
+        setStatus("err", msg.error || "Data fetch failed");
+        showErrorBanner(`⚠️ <b>Meta API Error</b> ${msg.code ? `[${msg.code}]` : ''}: ${msg.error || msg.raw}`);
+        console.error("[SYNC ERROR]", msg);
+      }
+
+      // ── New: Fatal error (token expired etc) ──
+      if (msg.type === "fatal_error") {
+        setStatus("err", "Token Expired");
+        showErrorBanner(`🔴 <b>${msg.code === 'TOKEN_EXPIRED' ? 'Access Token Expired' : 'Fatal Error'}</b>: ${msg.message} — Click Reconnect.`, true);
+        console.error("[FATAL]", msg);
       }
 
       if (msg.type === "disconnected") {
@@ -252,7 +301,8 @@ function connect() {
       }
 
       if (msg.type === "countdown") {
-        document.getElementById("syncTime").textContent = `Next sync: ${msg.remaining}s`;
+        const el = document.getElementById("syncTime");
+        if (el) el.textContent = `Next sync: ${msg.remaining}s`;
       }
     } catch (_) { }
   };
@@ -324,11 +374,13 @@ function setStatus(s, errM) {
   if (dot) dot.className = "live-dot" + (s === "err" ? " err" : s === "wait" ? " wait" : s === "ok" ? " ok" : "");
   if (lbl) {
     lbl.className = "live-label" + (s === "err" ? " err" : s === "wait" ? " wait" : s === "ok" ? " ok" : "");
-    lbl.textContent = s === "ok" ? "Live" : s === "wait" ? "Updating..." : "Disconnected";
-    if (errM && s === "err") {
-      lbl.textContent = "Error: " + (errM.length > 15 ? errM.substring(0, 15) + "..." : errM);
-      lbl.title = errM;
-    }
+    if (s === "ok") lbl.textContent = "Live";
+    else if (s === "wait") lbl.textContent = "Connecting...";
+    else if (s === "err") {
+      const shortErr = errM ? (errM.length > 20 ? errM.substring(0, 20) + "..." : errM) : "API Error";
+      lbl.textContent = shortErr;
+      lbl.title = errM || "Error";
+    } else lbl.textContent = "Offline";
   }
 }
 

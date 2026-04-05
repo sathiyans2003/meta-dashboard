@@ -168,14 +168,14 @@ const SUMMARY_FIELDS = [
   "actions", "action_values", "impressions", "clicks", "spend", "reach",
   "frequency", "cpm", "cpc", "cpp", "purchase_roas", "website_purchase_roas",
   "quality_ranking", "engagement_rate_ranking", "conversion_rate_ranking",
-  "video_p100_watched_actions", "date_start", "date_stop", "inline_result_count"
+  "video_p100_watched_actions", "date_start", "date_stop"
 ].join(",");
 
 const ITEM_FIELDS = [
   "actions", "action_values", "impressions", "clicks", "spend", "reach",
   "frequency", "cpm", "cpc", "cpp", "purchase_roas", "website_purchase_roas",
   "quality_ranking", "engagement_rate_ranking", "conversion_rate_ranking",
-  "video_p100_watched_actions", "date_start", "date_stop", "inline_result_count"
+  "video_p100_watched_actions", "date_start", "date_stop"
 ].join(",");
 
 
@@ -200,8 +200,8 @@ function parseMetrics(d) {
   const spend = parseFloat(d.spend || 0);
   const imps = parseInt(d.impressions || 0);
 
-  // Prioritize inline_result_count from Meta for 100% accuracy with Ads Manager
-  const resCount = parseInt(d.inline_result_count || 0) || getResultsCount(ac, d.objective);
+  // Use our robust getResultsCount logic to sum relevant actions
+  const resCount = getResultsCount(ac, d.objective);
 
   const cpRes = resCount > 0 ? (spend / resCount) : 0;
   const resRate = imps > 0 ? ((resCount / imps) * 100).toFixed(2) : "0";
