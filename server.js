@@ -19,9 +19,9 @@ const wss = new WebSocket.Server({ server });
 // ─── Middleware: Extract User Session from Headers ──────────────────────────
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/")) {
-    const token = req.headers["x-meta-token"];
-    const accId = req.headers["x-meta-account-id"];
-    const datePreset = req.headers["x-meta-date-preset"] || "today";
+    const token = req.headers["x-meta-token"] || req.query.token;
+    const accId = req.headers["x-meta-account-id"] || req.query.accountId;
+    const datePreset = req.headers["x-meta-date-preset"] || req.query.datePreset || "today";
     if (token && accId) {
       req.userSession = { token, accId, datePreset };
     }

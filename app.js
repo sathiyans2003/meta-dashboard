@@ -277,23 +277,20 @@ function scheduleReconn() {
 async function pollData() {
   if (!currentToken || !currentAccountId) return;
   try {
-    const res = await fetch(`${API}/data`, {
-      headers: {
-        "x-meta-token": currentToken,
-        "x-meta-account-id": currentAccountId,
-        "x-meta-date-preset": localStorage.getItem("meta_date_preset") || "today"
-      }
-    });
+    const preset = localStorage.getItem("meta_date_preset") || "today";
+    // We send via query params because some hosts strip headers
+    const url = `${API}/data?token=${encodeURIComponent(currentToken)}&accountId=${encodeURIComponent(currentAccountId)}&datePreset=${encodeURIComponent(preset)}`;
+    const res = await fetch(url);
     const result = await res.json();
     if (result.ok) {
       data = result.data;
       onData({ type: "data", data, runCount: "Poll" });
       setStatus("ok");
     } else {
-      setStatus("err");
+      setStatus("err", result.error || "Meta API Error");
     }
   } catch (e) {
-    setStatus("err");
+    setStatus("err", "Host Connection Error");
   }
 }
 
@@ -321,13 +318,17 @@ function refreshData() {
   }
 }
 
-function setStatus(s) {
+function setStatus(s, errM) {
   const dot = document.getElementById("liveDot");
   const lbl = document.getElementById("liveLabel");
   if (dot) dot.className = "live-dot" + (s === "err" ? " err" : s === "wait" ? " wait" : s === "ok" ? " ok" : "");
   if (lbl) {
     lbl.className = "live-label" + (s === "err" ? " err" : s === "wait" ? " wait" : s === "ok" ? " ok" : "");
     lbl.textContent = s === "ok" ? "Live" : s === "wait" ? "Updating..." : "Disconnected";
+    if (errM && s === "err") {
+      lbl.textContent = "Error: " + (errM.length > 15 ? errM.substring(0, 15) + "..." : errM);
+      lbl.title = errM;
+    }
   }
 }
 
@@ -521,7 +522,7 @@ function handleSort(tabPrefix, key) {
 // ══════════════════════════════════════════════════════════════
 // OVERVIEW RENDER
 // ══════════════════════════════════════════════════════════════
-function renderOverview(s, isFiltered = false) {
+function renderOverview(s = {}, isFiltered = false) {
   const kpiTitle = document.querySelector("#tab-overview h2");
   if (kpiTitle) {
     const range = s.dateStart && s.dateStop ? `${s.dateStart} — ${s.dateStop}` : "";
@@ -530,61 +531,71 @@ function renderOverview(s, isFiltered = false) {
       ? `Top KPIs ${rangeLabel} <span style="color:var(--fb); font-size:11px; margin-left:10px; font-weight:700;">• FILTERED</span>`
       : `Top KPIs ${rangeLabel} <span style="color:var(--muted); font-size:11px; margin-left:10px; font-weight:400;">• ACCOUNT TOTAL</span>`;
   }
+
   const kpiIds = activeColIds["overview"] || ["spend", "impressions", "clicks", "ctr", "purchaseRoas", "cpc", "cpm", "reach"];
   const kpis = kpiIds.map(id => {
     const def = ALL_METRICS.find(m => m.k === id);
     if (!def) return null;
     let vStr = "0";
-    if (s[id]) {
-      if (def.f === "money") vStr = `₹${fmtM(s[id])}`;
-      else if (def.f === "pct") vStr = `${s[id]}%`;
-      else if (def.f === "roas") vStr = `${s[id]}×`;
-      else if (def.f === "big") vStr = fmtBig(s[id]);
-      else vStr = s[id];
+    const val = s[id];
+    if (val !== undefined && val !== null) {
+      if (def.f === "money") vStr = `₹${fmtM(val)}`;
+      else if (def.f === "pct") vStr = `${val}%`;
+      else if (def.f === "roas") vStr = `${val}×`;
+      else if (def.f === "big") vStr = fmtBig(val);
+      else vStr = val;
     }
     return { v: vStr, l: def.h };
   }).filter(Boolean);
 
-  document.getElementById("kpiStrip").innerHTML =
-    kpis.map(k => `<div class="kpi"><div class="kpi-v">${k.v}</div><div class="kpi-l">${k.l}</div></div>`).join("");
+  const kStrip = document.getElementById("kpiStrip");
+  if (kStrip) kStrip.innerHTML = kpis.map(k => `<div class="kpi"><div class="kpi-v">${k.v}</div><div class="kpi-l">${k.l}</div></div>`).join("");
 
-  document.getElementById("convGrid").innerHTML = [
-    { l: "Purchases", v: fmtBig(s.purchases), c: "c-green" },
-    { l: "Leads", v: fmtBig(s.leads), c: "c-blue" },
-    { l: "Conversations", v: fmtBig(s.messagingConversations), c: "c-purple" },
-    { l: "Results", v: fmtBig(s.results), c: "" },
+  const cGrid = document.getElementById("convGrid");
+  if (cGrid) cGrid.innerHTML = [
+    { l: "Purchases", v: fmtBig(s.purchases || 0), c: "c-green" },
+    { l: "Leads", v: fmtBig(s.leads || 0), c: "c-blue" },
+    { l: "Conversations", v: fmtBig(s.messagingConversations || 0), c: "c-purple" },
+    { l: "Results", v: fmtBig(s.results || 0), c: "" },
   ].map(c => `<div class="conv-cell"><div class="conv-cell-label">${c.l}</div><div class="conv-cell-val ${c.c}">${c.v}</div></div>`).join("");
 
-  document.getElementById("engGrid").innerHTML = [
-    ["Link Clicks", fmtBig(s.linkClicks)],
-    ["Landing Page", fmtBig(s.landingPageViews)],
-    ["CTR (%)", `${s.ctr}%`],
-    ["CPC (₹)", fmtM(s.cpc)],
-    ["Reach", fmtBig(s.reach)],
-    ["Frequency", s.frequency],
+  const eGrid = document.getElementById("engGrid");
+  if (eGrid) eGrid.innerHTML = [
+    ["Link Clicks", fmtBig(s.linkClicks || 0)],
+    ["Landing Page", fmtBig(s.landingPageViews || 0)],
+    ["CTR (%)", `${s.ctr || 0}%`],
+    ["CPC (₹)", fmtM(s.cpc || 0)],
+    ["Reach", fmtBig(s.reach || 0)],
+    ["Frequency", s.frequency || "1.00"],
   ].map(([l, v]) => `<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
 
-  const roas = parseFloat(s.purchaseRoas);
-  document.getElementById("delivChip").textContent = roas >= 2 ? "Healthy 🟢" : roas >= 1 ? "Average 🟡" : "Low 🔴";
-  document.getElementById("delivChip").className = "chip " + (roas >= 2 ? "chip--green" : roas >= 1 ? "chip--amber" : "chip--red");
+  const roas = parseFloat(s.purchaseRoas || 0);
+  const dChip = document.getElementById("delivChip");
+  if (dChip) {
+    dChip.textContent = roas >= 2 ? "Healthy 🟢" : roas >= 1 ? "Average 🟡" : "Low 🔴";
+    dChip.className = "chip " + (roas >= 2 ? "chip--green" : roas >= 1 ? "chip--amber" : "chip--red");
+  }
 
-  document.getElementById("delivGrid").innerHTML = [
-    { l: "Frequency", v: s.frequency },
-    { l: "Reach", v: fmtBig(s.reach) },
-    { l: "CPM (₹)", v: fmtM(s.cpm) },
-    { l: "CPC (₹)", v: fmtM(s.cpc) },
-    { l: "ROAS", v: `${s.purchaseRoas}×` },
-    { l: "Spend (₹)", v: fmtM(s.spend) },
+  const dGrid = document.getElementById("delivGrid");
+  if (dGrid) dGrid.innerHTML = [
+    { l: "Frequency", v: s.frequency || "1.00" },
+    { l: "Reach", v: fmtBig(s.reach || 0) },
+    { l: "CPM (₹)", v: fmtM(s.cpm || 0) },
+    { l: "CPC (₹)", v: fmtM(s.cpc || 0) },
+    { l: "ROAS", v: `${s.purchaseRoas || 0}×` },
+    { l: "Spend (₹)", v: fmtM(s.spend || 0) },
   ].map(h => `<div class="deliv-cell"><div class="deliv-cell-lbl">${h.l}</div><div class="deliv-cell-val">${h.v}</div></div>`).join("");
 
-  document.getElementById("videoGrid").innerHTML = [
+  const vGrid = document.getElementById("videoGrid");
+  if (vGrid) vGrid.innerHTML = [
     ["Video Views", fmtBig(s.videoViews || 0)],
     ["Video 100%", fmtBig(s.v100 || 0)],
     ["Post Engagement", fmtBig(s.postEngagement || 0)],
-    ["Result Rate", `${s.resultRate}%`],
+    ["Result Rate", `${s.resultRate || 0}%`],
   ].map(([l, v]) => `<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
 
-  document.getElementById("qualityGrid").innerHTML = [
+  const qGrid = document.getElementById("qualityGrid");
+  if (qGrid) qGrid.innerHTML = [
     ["Quality Ranking", s.qualityRanking || "N/A"],
     ["Engagement Ranking", s.engagementRanking || "N/A"],
     ["Conversion Ranking", s.conversionRanking || "N/A"],
@@ -592,7 +603,8 @@ function renderOverview(s, isFiltered = false) {
     ["Unique CTR", `${s.uniqueCtr || 0}%`],
   ].map(([l, v]) => `<div class="eng-row"><span class="eng-lbl">${l}</span><span class="eng-val">${v}</span></div>`).join("");
 
-  document.getElementById("costGrid").innerHTML = [
+  const coGrid = document.getElementById("costGrid");
+  if (coGrid) coGrid.innerHTML = [
     ["Cost/Result", fmtM(s.costPerResult || 0)],
     ["Cost/Purchase", fmtM(s.costPerPurchase || 0)],
     ["Cost/Lead", fmtM(s.costPerLead || 0)],
