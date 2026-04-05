@@ -16,7 +16,7 @@ function showErrorBanner(msg, isFatal = false) {
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <span>${msg}</span>
     </div>
-    ${isFatal 
+    ${isFatal
       ? `<button onclick="window.location.href='index.html'" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:#fff;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Reconnect →</button>`
       : `<button onclick="document.getElementById('errBanner').style.display='none'" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;">✕</button>`
     }
@@ -58,15 +58,21 @@ window.onload = () => {
   loadColPrefs();
   const datePreset = localStorage.getItem("meta_date_preset") || "today";
   if (document.getElementById("datePresetSel")) {
-    document.getElementById("datePresetSel").value = datePreset;
+    document.getElementById("datePresetSel").value = typeof datePreset === 'string' && datePreset.startsWith('{') ? 'custom' : datePreset;
   }
 
-  // INSTANT LOAD: Load last known account info from storage
+  // ⚡ INSTANT LOAD: Show cached account info
   const cachedAcc = localStorage.getItem("meta_last_account_info");
   if (cachedAcc) {
+    try { updateSidebarAccount(JSON.parse(cachedAcc)); } catch (e) { }
+  }
+
+  // ⚡ INSTANT LOAD: Show last known data immediately (before WS connects)
+  const cachedData = localStorage.getItem("meta_last_data");
+  if (cachedData) {
     try {
-      const acc = JSON.parse(cachedAcc);
-      updateSidebarAccount(acc);
+      data = JSON.parse(cachedData);
+      onData({ type: "data", data, runCount: "Cache", fromCache: true });
     } catch (e) { }
   }
 
@@ -405,11 +411,21 @@ function updateSidebarAccount(acc) {
 // DATA RENDER
 // ══════════════════════════════════════════════════════════════
 function onData(msg) {
-  if (!data) return; // Wait until global data is set
-  setStatus("ok");
+  if (!data) return;
+  const isCache = msg.fromCache === true;
+
+  // Save fresh data to localStorage for next instant load
+  if (!isCache) {
+    try { localStorage.setItem("meta_last_data", JSON.stringify(data)); } catch (e) { }
+    hideErrorBanner();
+    setStatus("ok");
+  } else {
+    setStatus("wait"); // still waiting for fresh data
+  }
+
   const { runCount: rc } = msg;
   if (document.getElementById("runCount")) {
-    document.getElementById("runCount").textContent = `Run #${rc || 1}`;
+    document.getElementById("runCount").textContent = isCache ? "Cached" : `Run #${rc || 1}`;
   }
 
   const camps = data.campaigns || [];
@@ -417,7 +433,6 @@ function onData(msg) {
   const ads = data.ads || [];
 
   const cLive = camps.filter(c => c.status === "ACTIVE").length;
-  const sLive = adsets.filter(s => s.status === "ACTIVE").length;
   const aLive = ads.filter(a => a.status === "ACTIVE").length;
 
   if (document.getElementById("pageDesc")) {

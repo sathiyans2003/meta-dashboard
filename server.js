@@ -16,6 +16,29 @@ app.use(express.static(path.join(__dirname)));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// ── In-Memory Cache (per account + date preset) ──────────────────────
+const dataCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function getCacheKey(accountId, datePreset) {
+  return `${accountId}::${typeof datePreset === 'object' ? JSON.stringify(datePreset) : datePreset}`;
+}
+
+function getCache(accountId, datePreset) {
+  const key = getCacheKey(accountId, datePreset);
+  const entry = dataCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > CACHE_TTL_MS) { dataCache.delete(key); return null; }
+  return entry.data;
+}
+
+function setCache(accountId, datePreset, data) {
+  const key = getCacheKey(accountId, datePreset);
+  dataCache.set(key, { data, ts: Date.now() });
+}
+
+
+
 // ─── Middleware: Extract User Session from Headers ──────────────────────────
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/")) {
@@ -183,28 +206,35 @@ wss.on("close", () => clearInterval(heartbeat));
 // ─── Sync Logic ─────────────────────────────────────────────────────────────
 async function syncNow(ws) {
   if (!ws.token || !ws.accountId) return;
+
+  // ⚡ Step 1: Send cached data IMMEDIATELY (instant render)
+  const cached = getCache(ws.accountId, ws.datePreset);
+  if (cached) {
+    ws.send(JSON.stringify({ type: "data", data: cached, runCount: ws.runCount || 1, fromCache: true }));
+    console.log(`[SYNC] ⚡ Cache hit → ${ws.accountId}`);
+  }
+
+  // Step 2: Fetch fresh data in background
   try {
     console.log(`[SYNC] Fetching → ${ws.accountId} | ${ws.datePreset} | Run #${ws.runCount}`);
     const data = await fetchAllMeta(ws.token, ws.accountId, ws.datePreset);
-    ws.send(JSON.stringify({ type: "data", data, runCount: ws.runCount || 1 }));
+    setCache(ws.accountId, ws.datePreset, data);  // update cache
     ws.runCount = (ws.runCount || 1) + 1;
+    ws.send(JSON.stringify({ type: "data", data, runCount: ws.runCount, fromCache: false }));
     console.log(`[SYNC] ✅ Done → ${ws.accountId} | Campaigns: ${data.campaigns?.length} | Ads: ${data.ads?.length}`);
   } catch(e) {
     const apiErr = e.response?.data?.error;
     const errMsg = apiErr?.message || e.message;
     const errCode = apiErr?.code || 0;
-    const errSubCode = apiErr?.error_subcode || 0;
-    const errType = apiErr?.type || "";
 
     console.error(`[SYNC] ❌ FAILED → ${ws.accountId} | Code: ${errCode} | ${errMsg}`);
 
-    // Classify the error for the client
     let clientErr = errMsg;
     if (errCode === 190 || errMsg.includes("Invalid OAuth") || errMsg.includes("expired") || errMsg.includes("access token")) {
       clientErr = "Access token expired or invalid. Please reconnect your Facebook account.";
       ws.send(JSON.stringify({ type: "fatal_error", code: "TOKEN_EXPIRED", message: clientErr }));
       return;
-    } else if (errCode === 17 || errMsg.includes("rate limit") || errMsg.includes("too many calls")) {
+    } else if (errCode === 17 || errMsg.includes("rate limit")) {
       clientErr = "Meta API rate limit reached. Please wait 1-2 minutes and refresh.";
     } else if (errCode === 100) {
       clientErr = "Invalid ad account ID or insufficient permissions.";
@@ -212,14 +242,10 @@ async function syncNow(ws) {
       clientErr = "Meta API is busy. Auto-retrying in 60 seconds.";
     }
 
-    ws.send(JSON.stringify({ 
-      type: "sync_error", 
-      error: clientErr,
-      raw: errMsg,
-      code: errCode,
-      subcode: errSubCode,
-      errorType: errType
-    }));
+    // If we sent cached data, don't show error — user already sees something
+    if (!cached) {
+      ws.send(JSON.stringify({ type: "sync_error", error: clientErr, raw: errMsg, code: errCode }));
+    }
   }
 }
 
