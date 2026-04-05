@@ -143,7 +143,10 @@ async function syncNow(ws) {
     const data = await fetchAllMeta(ws.token, ws.accountId, ws.datePreset);
     ws.send(JSON.stringify({ type: "data", data, runCount: ws.runCount || 1 }));
     ws.runCount = (ws.runCount || 1) + 1;
-  } catch(e) {}
+  } catch(e) {
+    console.error("SYNC ERROR for", ws.accountId, ":", e.response?.data || e.message);
+    ws.send(JSON.stringify({ type: "status", status: "error", error: "Sync failed. Check logs." }));
+  }
 }
 
 function startSyncWorker(ws) {

@@ -277,9 +277,9 @@ function refreshData() {
 function setStatus(s) {
   const dot = document.getElementById("liveDot");
   const lbl = document.getElementById("liveLabel");
-  if(dot) dot.className = "live-dot" + (s==="err" ? " err" : s==="wait" ? " wait" : "");
+  if(dot) dot.className = "live-dot" + (s==="err" ? " err" : s==="wait" ? " wait" : s==="ok" ? " ok" : "");
   if(lbl) {
-    lbl.className = "live-label" + (s==="err" ? " err" : s==="wait" ? " wait" : "");
+    lbl.className = "live-label" + (s==="err" ? " err" : s==="wait" ? " wait" : s==="ok" ? " ok" : "");
     lbl.textContent = s==="ok" ? "Live" : s==="wait" ? "Updating..." : "Disconnected";
   }
 }
@@ -297,7 +297,7 @@ function updateSidebarAccount(acc) {
   if (document.getElementById("overviewAccName")) {
     document.getElementById("overviewAccName").textContent = acc.name || "—";
     document.getElementById("overviewAccId").textContent   = acc.id   || "—";
-    document.getElementById("overviewAccTz").textContent   = acc.timezone || "—";
+    document.getElementById("overviewAccTz").textContent   = acc.timezone_name || acc.timezone || "—";
   }
 }
 
@@ -305,21 +305,27 @@ function updateSidebarAccount(acc) {
 // DATA RENDER
 // ══════════════════════════════════════════════════════════════
 function onData(msg) {
+  if (!data) return; // Wait until global data is set
   setStatus("ok");
   const { runCount: rc } = msg;
-  document.getElementById("runCount").textContent = `Run #${rc}`;
+  if (document.getElementById("runCount")) {
+    document.getElementById("runCount").textContent = `Run #${rc || 1}`;
+  }
   
-  const cLive = data.campaigns.filter(c => c.status === "ACTIVE").length;
-  const cOff = data.campaigns.filter(c => c.status === "PAUSED").length;
-  const sLive = data.adsets.filter(s => s.status === "ACTIVE").length;
-  const sOff = data.adsets.filter(s => s.status === "PAUSED").length;
-  const aLive = data.ads.filter(a => a.status === "ACTIVE").length;
-  const aOff = data.ads.filter(a => a.status === "PAUSED").length;
+  const camps = data.campaigns || [];
+  const adsets = data.adsets || [];
+  const ads    = data.ads || [];
 
-  document.getElementById("pageDesc").textContent =
-    `${data.campaigns.length} Campaigns (${cLive} Live) · ${data.adsets.length} Ad Sets · ${data.ads.length} Ads (${aLive} Live)`;
+  const cLive = camps.filter(c => c.status === "ACTIVE").length;
+  const sLive = adsets.filter(s => s.status === "ACTIVE").length;
+  const aLive = ads.filter(a => a.status === "ACTIVE").length;
+
+  if (document.getElementById("pageDesc")) {
+    document.getElementById("pageDesc").textContent =
+      `${camps.length} Campaigns (${cLive} Live) · ${adsets.length} Ad Sets · ${ads.length} Ads (${aLive} Live)`;
+  }
     
-  applySelectionFilter(); // Update summary if selection exists
+  applySelectionFilter(); 
   const activeTab = document.querySelector(".nav-link.active")?.dataset?.tab || "overview";
   renderTab(activeTab);
 }
