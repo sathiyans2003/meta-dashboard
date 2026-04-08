@@ -5,6 +5,7 @@ const path = require("path");
 const http = require("http");
 const WebSocket = require("ws");
 const { fetchAccountSummary, fetchCampaigns, fetchAdSets, fetchAds } = require("./metaApi");
+const { getAll: getUsers, upsert: upsertUser, getById: getUserById, remove: removeUser } = require("./users");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -96,14 +97,34 @@ app.get("/auth/callback", async (req, res) => {
       params: { grant_type: "fb_exchange_token", client_id: appId, client_secret: appSecret, fb_exchange_token: tokenRes.data.access_token }
     });
     const token = longRes.data.access_token;
-    const accRes = await axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, { 
-      params: { fields: "id,name,account_status,currency,timezone_name,timezone_offset_hours_utc", access_token: token, limit: 500 } 
-    });
+    const [accRes, profileRes] = await Promise.all([
+      axios.get(`https://graph.facebook.com/v19.0/me/adaccounts`, {
+        params: { fields: "id,name,account_status,currency,timezone_name,timezone_offset_hours_utc", access_token: token, limit: 500 }
+      }),
+      axios.get(`https://graph.facebook.com/v19.0/me`, {
+        params: { fields: "id,name,picture.type(large)", access_token: token }
+      })
+    ]);
     const accounts = accRes.data?.data || [];
+    const fbProfile = profileRes.data;
+    const savedUser = upsertUser({
+      fbUserId: fbProfile.id,
+      name: fbProfile.name,
+      picture: fbProfile.picture?.data?.url || "",
+      token
+    });
 
+    const payload = JSON.stringify({
+      type: "fb_connected",
+      token,
+      userId: savedUser.id,
+      userName: fbProfile.name,
+      userPicture: fbProfile.picture?.data?.url || "",
+      accounts
+    });
     res.send(`<html><body><script>
-      if (window.opener) { 
-        window.opener.postMessage({ type: 'fb_connected', token: '${token}', accounts: ${JSON.stringify(accounts)} }, '*'); 
+      if (window.opener) {
+        window.opener.postMessage(${payload}, '*');
       }
       window.close();
     </script></body></html>`);
@@ -112,6 +133,25 @@ app.get("/auth/callback", async (req, res) => {
     console.error("Auth Callback Error:", errorMsg);
     res.status(400).send(`<h3>OAuth Error</h3><p>${errorMsg}</p><p><a href="/">Try Again</a></p>`);
   }
+});
+
+// ─── User Management API ─────────────────────────────────────────────────────
+// List all saved users (no tokens)
+app.get("/api/users", (req, res) => {
+  res.json(getUsers());
+});
+
+// Switch to a saved user — returns token so client can store it
+app.post("/api/users/switch/:id", (req, res) => {
+  const u = getUserById(req.params.id);
+  if (!u) return res.status(404).json({ error: "User not found" });
+  res.json({ token: u.token, userId: u.id, name: u.name, picture: u.picture });
+});
+
+// Remove a saved user
+app.delete("/api/users/:id", (req, res) => {
+  removeUser(req.params.id);
+  res.json({ ok: true });
 });
 
 // ─── WebSocket Logic (Multi-user) ───────────────────────────────────────────

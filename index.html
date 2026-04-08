@@ -16,6 +16,19 @@
     .fb-spinner{width:48px;height:48px;border:3px solid rgba(24,119,242,0.2);border-top-color:#1877F2;border-radius:50%;animation:fbspin 0.8s linear infinite;}
     @keyframes fbspin{to{transform:rotate(360deg)}}
     .fb-loading-text{font-size:14px;color:#546882;font-family:'Inter',sans-serif;}
+    /* ── User Cards ── */
+    .user-card{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg-2);border:1.5px solid var(--border-md);border-radius:10px;cursor:pointer;transition:all 0.18s;}
+    .user-card:hover{border-color:var(--fb);background:var(--bg-3);transform:translateY(-1px);}
+    .user-card-active{border-color:rgba(24,119,242,0.5);background:rgba(24,119,242,0.07);}
+    .user-card-avatar{position:relative;flex-shrink:0;}
+    .user-card-initials{width:36px;height:36px;border-radius:50%;background:var(--fb-dim);color:var(--fb);font-weight:700;font-size:15px;align-items:center;justify-content:center;}
+    .user-card-info{flex:1;min-width:0;}
+    .user-card-name{font-size:13.5px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .user-card-sub{font-size:10.5px;color:var(--muted);margin-top:1px;}
+    .user-card-remove{background:transparent;border:none;color:var(--dim);cursor:pointer;padding:4px 6px;border-radius:5px;font-size:13px;transition:all 0.15s;line-height:1;}
+    .user-card-remove:hover{background:rgba(239,83,80,0.12);color:var(--red);}
+    .connect-btn-secondary{display:inline-flex;align-items:center;gap:8px;padding:9px 20px;background:transparent;border:1.5px solid var(--border-md);border-radius:99px;color:var(--text-2);font-family:var(--ff-ui);font-size:13px;font-weight:600;cursor:pointer;transition:all 0.18s;}
+    .connect-btn-secondary:hover{border-color:var(--fb);color:var(--fb);background:var(--fb-dim);}
   </style>
 </head>
 <body>
@@ -35,8 +48,11 @@
     <div class="connect-title">Meta Ads Intelligence</div>
     <div class="connect-sub">உங்கள் real-time ad data — instant connect</div>
 
-    <!-- Facebook OAuth -->
-    <div style="text-align:center;padding:10px 0 20px;">
+    <!-- ── Saved Users Picker ── -->
+    <div id="userPickerSection" style="display:none; margin-bottom:4px;"></div>
+
+    <!-- ── Facebook OAuth ── -->
+    <div id="fbSection" style="text-align:center;padding:10px 0 20px;">
       <p style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6;">
         Facebook button click பண்ணினால் automatically உங்கள் account-க்கு login ஆகி
         எல்லா Ad Accounts-ம் auto detect ஆகும்.

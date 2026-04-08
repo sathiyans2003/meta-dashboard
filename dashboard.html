@@ -297,10 +297,26 @@
     </div>
 
     <div class="sidebar-footer">
-      <div style="margin-bottom:10px; cursor:pointer; padding:8px; margin:-8px; border-radius:var(--r-md); transition:background 0.2s;" 
-           onclick="openAccountModal()" 
+
+      <!-- ── Logged-in User ── -->
+      <div id="sidebarUserRow" style="display:flex;align-items:center;gap:10px;padding:8px 0 10px;border-bottom:1px solid var(--border);margin-bottom:10px;">
+        <div id="sidebarUserAvatar" style="width:30px;height:30px;border-radius:50%;background:var(--fb-dim);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;">
+          <span id="sidebarUserInitial" style="font-size:13px;font-weight:700;color:var(--fb);">?</span>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div id="sidebarUserName" style="font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Loading...</div>
+          <div style="font-size:10px;color:var(--dim);">Meta Ads User</div>
+        </div>
+        <a href="index.html" title="Switch User" style="color:var(--dim);flex-shrink:0;display:flex;align-items:center;padding:4px;border-radius:5px;transition:color 0.15s;"
+           onmouseover="this.style.color='var(--fb)'" onmouseout="this.style.color='var(--dim)'">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 01-4 4H3"/></svg>
+        </a>
+      </div>
+
+      <div style="margin-bottom:10px; cursor:pointer; padding:8px; margin:-8px; border-radius:var(--r-md); transition:background 0.2s;"
+           onclick="openAccountModal()"
            title="Click to switch account"
-           onmouseover="this.style.background='var(--bg-2)'" 
+           onmouseover="this.style.background='var(--bg-2)'"
            onmouseout="this.style.background='transparent'">
         <div
           style="font-size:10px;color:var(--dim);font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">

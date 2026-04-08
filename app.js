@@ -56,6 +56,7 @@ window.onload = () => {
   }
 
   loadColPrefs();
+  updateSidebarUser();
   const datePreset = localStorage.getItem("meta_date_preset") || "today";
   if (document.getElementById("datePresetSel")) {
     document.getElementById("datePresetSel").value = typeof datePreset === 'string' && datePreset.startsWith('{') ? 'custom' : datePreset;
@@ -360,11 +361,42 @@ function startPolling() {
 
 function disconnectFacebook() {
   if (!confirm("Disconnect pandhal ellaa data clear aagum. Continue?")) return;
-  // Stateless clean up: Just clear local storage and go home
   localStorage.removeItem("meta_token");
   localStorage.removeItem("meta_account_id");
   localStorage.removeItem("meta_date_preset");
+  localStorage.removeItem("meta_user_id");
+  localStorage.removeItem("meta_user_name");
+  localStorage.removeItem("meta_user_picture");
+  localStorage.removeItem("meta_last_account_info");
+  localStorage.removeItem("meta_last_data");
   window.location.href = "index.html";
+}
+
+function updateSidebarUser() {
+  const name = localStorage.getItem("meta_user_name");
+  const picture = localStorage.getItem("meta_user_picture");
+
+  const nameEl = document.getElementById("sidebarUserName");
+  const avatarEl = document.getElementById("sidebarUserAvatar");
+  const initialEl = document.getElementById("sidebarUserInitial");
+
+  if (nameEl) nameEl.textContent = name || "Meta User";
+
+  if (avatarEl && picture) {
+    const img = document.createElement("img");
+    img.src = picture;
+    img.alt = name || "User";
+    img.style.cssText = "width:30px;height:30px;border-radius:50%;object-fit:cover;";
+    img.onerror = () => {
+      img.remove();
+      if (initialEl) initialEl.style.display = "flex";
+    };
+    if (initialEl) initialEl.style.display = "none";
+    avatarEl.appendChild(img);
+  }
+  if (initialEl && name && !picture) {
+    initialEl.textContent = name[0].toUpperCase();
+  }
 }
 
 function refreshData() {
